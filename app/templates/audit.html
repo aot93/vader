@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Audit{% endblock %}
+{% block body %}
+<h1>Audit log</h1>
+<p class="muted">A clear record of what actually happened during a run (§3.7).</p>
+
+<div class="grid cols-2">
+  <div>
+    <h2>Application actions</h2>
+    <div class="panel">
+      <table>
+        <tr><th>When</th><th>Actor</th><th>Action</th><th>Entity</th></tr>
+        {% for e in entries %}
+        <tr>
+          <td class="tag">{{ e.ts | dt }}</td>
+          <td>{{ e.actor }}</td>
+          <td>{{ e.action }}<div class="tag mono">{{ e.detail | tojson }}</div></td>
+          <td class="tag">{{ e.entity_type or '' }} {{ e.entity_id or '' }}</td>
+        </tr>
+        {% else %}<tr><td colspan="4" class="muted">Nothing logged yet.</td></tr>{% endfor %}
+      </table>
+    </div>
+  </div>
+  <div>
+    <h2>Tape / drive events</h2>
+    <div class="panel">
+      <table>
+        <tr><th>When</th><th>Event</th><th>Drive/Slot</th><th>By</th><th>Result</th></tr>
+        {% for e in events %}
+        <tr>
+          <td class="tag">{{ e.started_at | dt }}</td>
+          <td>{{ e.event_type.value }}</td>
+          <td>{{ e.drive_number if e.drive_number is not none else '' }}{% if e.slot_number is not none %} / {{ e.slot_number }}{% endif %}</td>
+          <td>{{ e.initiated_by }}</td>
+          <td><span class="pill {{ e.result.value }}">{{ e.result.value }}</span></td>
+        </tr>
+        {% else %}<tr><td colspan="5" class="muted">No events.</td></tr>{% endfor %}
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

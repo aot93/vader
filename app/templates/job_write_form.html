@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}New write job{% endblock %}
+{% block body %}
+<h1>New write job</h1>
+<div class="panel" style="max-width:640px">
+<form method="post" action="/jobs/new/write">
+  <label>Source path (directory on this host / a mounted share) *</label>
+  <input type="text" name="source_path" placeholder="/mnt/sources/Project-Foo" required>
+
+  <label>Mode</label>
+  <select name="mode">
+    <option value="standard">standard — pack tapes fully, automatic spanning</option>
+    <option value="greedy">greedy — isolate one source, leave tapes partly full</option>
+  </select>
+
+  <label>Greedy source (required for greedy mode) — the machine/source name</label>
+  <input type="text" name="greedy_source" placeholder="Machine-07">
+
+  <div class="row">
+    <div><label>Project name override (optional)</label><input type="text" name="project_name"></div>
+    <div><label>Source machine (optional, applies to all units)</label><input type="text" name="source_machine"></div>
+  </div>
+
+  <label>Backup category</label>
+  <select name="backup_category">
+    {% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+  </select>
+
+  <label>Drive</label><input type="number" name="drive" value="0">
+
+  <p class="tag">The job runs in the background: scan → allocate tapes → copy → SHA256 →
+    read-back verify → catalog. It is idempotent; re-running after an interruption skips
+    already-written units.</p>
+  <p><button>Queue write job</button> <a class="btn ghost" href="/jobs">Cancel</a></p>
+</form>
+</div>
+{% endblock %}

@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Library{% endblock %}
+{% block body %}
+<h1>Library &amp; Drive Control</h1>
+<p class="muted">Backend: <code>{{ hw_backend }}</code> —
+  <form class="inline" method="post" action="/library/inventory"><button class="ghost">Refresh inventory</button></form>
+</p>
+
+{% if not state %}
+<div class="flash err">Library not reachable.</div>
+{% else %}
+
+<h2>Drives</h2>
+<div class="grid cols-2">
+{% for d in state.drives %}
+  <div class="panel">
+    <strong>Drive {{ d.number }}</strong> <span class="tag mono">{{ d.device }}</span><br>
+    Loaded: <strong>{{ d.loaded_barcode or '— empty —' }}</strong>
+    {% if d.loaded_from_slot is not none %}<span class="tag">(from slot {{ d.loaded_from_slot }})</span>{% endif %}<br>
+    {% if d.mount_point %}<span class="tag">mounted at {{ d.mount_point }}</span><br>{% endif %}
+    {% if d.loaded_barcode %}
+      <form class="inline" method="post" action="/library/unload">
+        <input type="hidden" name="drive" value="{{ d.number }}">
+        <label>Return to slot</label>
+        <div class="row">
+          <div><input type="number" name="slot" value="{{ d.loaded_from_slot or '' }}" required></div>
+          <div><button>Unload</button></div>
+        </div>
+      </form>
+    {% else %}
+      <form class="inline" method="post" action="/library/load">
+        <input type="hidden" name="drive" value="{{ d.number }}">
+        <label>Load from slot</label>
+        <div class="row">
+          <div><input type="number" name="slot" required></div>
+          <div><button>Load</button></div>
+        </div>
+      </form>
+    {% endif %}
+  </div>
+{% endfor %}
+</div>
+
+<h2>Slots</h2>
+<div class="panel">
+  <div class="libmap">
+    {% for s in state.slots %}
+      <div class="slot {% if not s.barcode %}empty{% endif %}">
+        <div class="b">slot {{ s.number }}</div>
+        <div>{{ s.barcode or '—' }}</div>
+        {% if s.is_cleaning_tape %}<div class="tag">cleaning</div>{% endif %}
+        {% if s.barcode and tape_by_barcode.get(s.barcode) %}
+          <div class="tag"><span class="pill {{ tape_by_barcode[s.barcode].status.value }}">{{ tape_by_barcode[s.barcode].status.value }}</span></div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<h2>Utilities</h2>
+<p class="muted">Deliberate maintenance actions — these change or wipe physical media.</p>
+<div class="grid cols-3">
+  <div class="panel">
+    <strong>Format (mkltfs)</strong>
+    <p class="tag">Refuses unless the tape's catalog status is <code>scratch</code>, or you force it.</p>
+    <form method="post" action="/library/format">
+      <label>Drive</label><input type="number" name="drive" value="0" required>
+      <label>Barcode</label><input type="text" name="barcode" required>
+      <label><input type="checkbox" name="force" value="true"> force (repurpose a non-scratch tape)</label>
+      <p><button class="danger">Format tape</button></p>
+    </form>
+  </div>
+  <div class="panel">
+    <strong>Clean drive</strong>
+    <p class="tag">Loads a cleaning cartridge, runs the cycle, unloads it. Logged as a tape event.</p>
+    <form method="post" action="/library/clean">
+      <label>Drive</label><input type="number" name="drive" value="0" required>
+      <label>Cleaning cartridge slot</label><input type="number" name="cleaning_slot" required>
+      <p><button class="danger">Run cleaning cycle</button></p>
+    </form>
+  </div>
+  <div class="panel">
+    <strong>Retire tape</strong>
+    <p class="tag">Marks a tape <code>retired</code> in the catalog. Does not touch the physical tape.</p>
+    <form method="post" action="/library/retire">
+      <label>Barcode</label><input type="text" name="barcode" required>
+      <label>Reason</label><input type="text" name="reason" placeholder="age / read errors / …">
+      <p><button class="danger">Retire</button></p>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

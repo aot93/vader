@@ -1,0 +1,39 @@
+# Production-ish local run: Postgres + app. On the archive VM, add device
+# passthrough (see Dockerfile header) and set HARDWARE_BACKEND=real.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: vader
+      POSTGRES_PASSWORD: vader
+      POSTGRES_DB: vader
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vader"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://vader:vader@db:5432/vader
+      HARDWARE_BACKEND: simulator          # set to "real" on the archive VM
+      SESSION_SECRET: change-me-in-production
+      # AUTH_TOKEN: set-a-shared-token       # leave unset on an isolated VM
+      DATA_DIR: /data
+      BACKUP_DIR: /data/backups
+    volumes:
+      - appdata:/data
+      # For HARDWARE_BACKEND=real also mount the LTFS mount base and pass devices:
+      # - /mnt/ltfs:/mnt/ltfs:shared
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:
+  appdata:

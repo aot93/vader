@@ -1,0 +1,14 @@
+# Top-level dependencies. Exact, fully-resolved versions live in
+# requirements.lock.txt — install THAT for reproducibility (see RUNBOOK.md).
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart
+itsdangerous
+sqlalchemy>=2.0
+alembic
+psycopg[binary]
+httpx
+
+# dev / test
+pytest

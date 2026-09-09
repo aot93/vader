@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Tapes{% endblock %}
+{% block body %}
+<h1>Tape Database</h1>
+<p>
+  <a class="btn ghost" href="/tapes/new">+ Register tape</a>
+  <span class="muted" style="margin-left:12px">Filter:</span>
+  <a href="/tapes">all</a>
+  {% for s in statuses %} · <a href="/tapes?status={{ s }}" {% if s==active_status %}style="font-weight:700"{% endif %}>{{ s }}</a>{% endfor %}
+</p>
+<div class="panel">
+<table>
+  <tr>
+    <th>Barcode</th><th>Gen</th><th>Status</th><th>Used / Capacity</th>
+    <th>Spans</th><th>Location</th><th>Last written</th><th>Last verified</th><th>Passes</th>
+  </tr>
+  {% for t in tapes %}
+  <tr>
+    <td><a href="/tapes/{{ t.barcode }}"><code>{{ t.barcode }}</code></a></td>
+    <td>{{ t.lto_generation or '—' }}</td>
+    <td><span class="pill {{ t.status.value }}">{{ t.status.value }}</span></td>
+    <td>
+      {{ t.used_bytes | bytes }} / {{ t.capacity_native_bytes | bytes }}
+      {% if t.capacity_native_bytes %}
+      <div class="bar" style="width:120px"><span style="width: {{ (100 * t.used_bytes / t.capacity_native_bytes) | round(0, 'floor') }}%"></span></div>
+      {% endif %}
+    </td>
+    <td>{{ span_counts.get(t.id, 0) }}</td>
+    <td>{{ t.physical_location or '—' }}</td>
+    <td class="tag">{{ t.last_written_at | dt }}</td>
+    <td class="tag">{{ t.last_verified_at | dt }}</td>
+    <td>{{ t.write_pass_count }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="9" class="muted">No tapes yet. Run an inventory on the <a href="/library">library</a> page, or register one.</td></tr>
+  {% endfor %}
+</table>
+</div>
+{% endblock %}

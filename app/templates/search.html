@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Search &amp; Restore{% endblock %}
+{% block body %}
+<h1>Search &amp; Restore</h1>
+
+<div class="panel">
+<form method="get" action="/search">
+  <div class="row">
+    <div><label>Text (project / shot / video / filename / path)</label><input type="text" name="q" value="{{ filters.q or '' }}"></div>
+    <div><label>Project</label><input type="text" name="project" value="{{ filters.project or '' }}"></div>
+    <div><label>Source machine</label>
+      <select name="source_machine"><option value="">any</option>
+        {% for m in machines %}<option value="{{ m }}" {% if m==filters.source_machine %}selected{% endif %}>{{ m }}</option>{% endfor %}
+      </select>
+    </div>
+  </div>
+  <div class="row">
+    <div><label>Backup category</label>
+      <select name="backup_category"><option value="">any</option>
+        {% for c in categories %}<option value="{{ c }}" {% if c==filters.backup_category %}selected{% endif %}>{{ c }}</option>{% endfor %}
+      </select>
+    </div>
+    <div><label>Content type</label>
+      <select name="content_type"><option value="">any</option>
+        {% for c in content_types %}<option value="{{ c }}" {% if c==filters.content_type %}selected{% endif %}>{{ c }}</option>{% endfor %}
+      </select>
+    </div>
+    <div><label>Tape barcode</label><input type="text" name="tape_barcode" value="{{ filters.tape_barcode or '' }}"></div>
+    <div><label>Written from</label><input type="date" name="written_from"></div>
+    <div><label>Written to</label><input type="date" name="written_to"></div>
+  </div>
+  <p><button>Search</button> <a class="btn ghost" href="/search">Reset</a></p>
+</form>
+</div>
+
+{% if has_query %}
+<form method="post" action="/search/prepare-restore">
+<div class="panel">
+  <p class="muted">{{ hits|length }} result(s). Tick items and prepare a guided restore.</p>
+  <div class="row" style="margin-bottom:10px">
+    <div><label>Restore destination path (blank = data/restores/…)</label><input type="text" name="destination_path" placeholder="/mnt/restore-target"></div>
+    <div style="flex:0"><label>&nbsp;</label><label class="tag"><input type="checkbox" name="include_manifests" value="true"> include manifests (review copy only)</label></div>
+    <div style="flex:0"><label>&nbsp;</label><button>Prepare restore</button></div>
+  </div>
+  <table>
+    <tr><th></th><th>Project</th><th>Item</th><th>Type</th><th>Category</th><th>Machine</th><th>Size</th><th>Tapes</th><th>Written</th><th>Verified</th></tr>
+    {% for h in hits %}
+    <tr>
+      <td><input type="checkbox" name="{{ 'sequence_ids' if h.kind=='sequence' else 'item_ids' }}" value="{{ h.id }}"></td>
+      <td>{{ h.project or '—' }}</td>
+      <td>{{ h.title }}<div class="tag">{{ h.subtitle }}</div><div class="tag mono">{{ h.source_path }}</div></td>
+      <td>{{ h.content_type }}</td>
+      <td>{{ h.backup_category }}</td>
+      <td>{{ h.source_machine or '—' }}</td>
+      <td>{{ h.size_bytes | bytes }}</td>
+      <td>
+        {% for tr in h.tapes %}
+          <a href="/tapes/{{ tr.barcode }}">{{ tr.barcode }}</a>{% if tr.part_count > 1 %} <span class="tag">p{{ tr.part_index + 1 }}/{{ tr.part_count }}</span>{% endif %}
+          <div class="tag">{% if tr.slot is not none %}slot {{ tr.slot }}{% else %}{{ tr.location }}{% endif %} · <span class="mono">{{ tr.ltfs_path }}</span></div>
+        {% endfor %}
+      </td>
+      <td class="tag">{{ h.written_at | dt }}</td>
+      <td class="tag">{{ h.verified_at | dt }}</td>
+    </tr>
+    {% else %}<tr><td colspan="10" class="muted">No matches.</td></tr>{% endfor %}
+  </table>
+</div>
+</form>
+{% endif %}
+{% endblock %}

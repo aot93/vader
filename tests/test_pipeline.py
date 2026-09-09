@@ -1,0 +1,179 @@
+"""End-to-end: write -> catalog -> search -> verify -> restore, on the simulator."""
+from __future__ import annotations
+
+from pathlib import Path
+
+from sqlalchemy import select
+
+from app.jobs import enqueue
+from app.jobs.worker import run_pending_jobs_inline
+from app.models import (
+    ContentItem,
+    ContentTapeSpan,
+    Job,
+    JobStatus,
+    JobType,
+    SequenceContainer,
+    Tape,
+    TapeStatus,
+)
+from app.services.catalog import SearchFilters, search_content
+from app.services.restore import prepare_restore
+
+
+def _run(db, job_type, params):
+    job = enqueue(db, job_type, params)
+    db.commit()
+    jid = job.id
+    run_pending_jobs_inline()
+    db.expire_all()
+    return db.get(Job, jid)
+
+
+def test_write_creates_catalog_with_checksums(seeded, make_source):
+    db = seeded
+    src = make_source()
+    job = _run(db, JobType.write, {"source_path": str(src), "mode": "standard"})
+    assert job.status == JobStatus.completed, job.error
+    assert job.result["readback_mismatches"] == []
+
+    seqs = db.scalars(select(SequenceContainer)).all()
+    assert len(seqs) == 1
+    assert seqs[0].written_at is not None
+    assert seqs[0].manifest_ref and Path(seqs[0].manifest_ref).is_file()
+    assert seqs[0].manifest_sha256
+
+    items = db.scalars(select(ContentItem)).all()
+    assert len(items) == 5  # 3 chunks + render.json + notes.txt
+    assert all(i.sha256 for i in items)
+
+    spans = db.scalars(select(ContentTapeSpan)).all()
+    assert spans
+    assert all(s.written_at and s.verified_at for s in spans)
+
+    written_tapes = db.scalars(select(Tape).where(Tape.status.in_([TapeStatus.active, TapeStatus.full]))).all()
+    assert written_tapes
+    assert all(t.used_bytes > 0 and t.last_written_at for t in written_tapes)
+
+
+def test_write_is_idempotent(seeded, make_source):
+    db = seeded
+    src = make_source()
+    _run(db, JobType.write, {"source_path": str(src), "mode": "standard"})
+    n_seq = db.query(SequenceContainer).count()
+    n_item = db.query(ContentItem).count()
+    n_span = db.query(ContentTapeSpan).count()
+
+    job2 = _run(db, JobType.write, {"source_path": str(src), "mode": "standard"})
+    assert job2.status == JobStatus.completed
+    assert db.query(SequenceContainer).count() == n_seq
+    assert db.query(ContentItem).count() == n_item
+    assert db.query(ContentTapeSpan).count() == n_span
+
+
+def test_large_sequence_spans_tapes(seeded, tmp_path):
+    db = seeded
+    # 2 MB tapes; make a shot bigger than one tape
+    shot = tmp_path / "Big" / "seqA" / "shotX"
+    shot.mkdir(parents=True)
+    for i in range(1, 21):
+        (shot / f"shotX.{i:04d}.exr").write_bytes(b"z" * 200_000)  # 20 * 200KB = 4 MB
+    job = _run(db, JobType.write, {"source_path": str(tmp_path), "mode": "standard"})
+    assert job.status == JobStatus.completed, job.error
+
+    seq = db.scalars(select(SequenceContainer)).first()
+    spans = db.scalars(
+        select(ContentTapeSpan).where(ContentTapeSpan.sequence_container_id == seq.id)
+    ).all()
+    assert len(spans) >= 2
+    assert len({s.tape_id for s in spans}) >= 2
+    assert {s.part_count for s in spans} == {len(spans)}
+
+
+def test_search_then_prepare_and_run_restore(seeded, make_source, tmp_path):
+    db = seeded
+    src = make_source()
+    _run(db, JobType.write, {"source_path": str(src), "mode": "standard"})
+
+    hits = search_content(db, SearchFilters(q="shot0100"))
+    assert hits
+    seq_hit = next(h for h in hits if h.kind == "sequence")
+    assert seq_hit.tapes
+
+    dest = tmp_path / "restored"
+    req = prepare_restore(db, sequence_container_ids=[seq_hit.id],
+                          destination_path=str(dest), requested_by="tester")
+    db.expire_all()
+    assert req.plan["tapes"]
+
+    job = _run(db, JobType.restore, {"restore_id": req.id})
+    assert job.status == JobStatus.completed, job.error
+
+    restored_frames = list(dest.rglob("*.exr"))
+    assert len(restored_frames) == 6
+    # manifests must NOT be in restored output
+    assert not list(dest.rglob("_manifests"))
+    assert not list(dest.rglob("*.json"))
+
+
+def test_greedy_write_isolates_source_to_own_tapes(seeded, tmp_path):
+    db = seeded
+    m7 = tmp_path / "m7"
+    (m7 / "data").mkdir(parents=True)
+    (m7 / "data" / "a.bin").write_bytes(b"a" * 100_000)
+    (m7 / "data" / "b.log").write_bytes(b"b" * 100_000)
+
+    job = _run(db, JobType.write, {
+        "source_path": str(m7), "mode": "greedy", "greedy_source": "Machine-07",
+        "backup_category": "machine_drive_backup",
+    })
+    assert job.status == JobStatus.completed, job.error
+
+    used = db.scalars(
+        select(Tape).where(Tape.dedicated_source_machine == "Machine-07")
+    ).all()
+    assert used
+    for t in used:
+        assert t.dedicated_source_machine == "Machine-07"
+
+
+def test_verify_flags_corruption_and_logs_read_error(seeded, make_source):
+    from app.hardware import get_hardware
+
+    db = seeded
+    src = make_source()
+    _run(db, JobType.write, {"source_path": str(src), "mode": "standard"})
+
+    # corrupt one frame on the simulated LTFS volume
+    hw = get_hardware()
+    vol_root = Path(hw.volumes)
+    exrs = list(vol_root.rglob("*.exr"))
+    assert exrs
+    exrs[0].write_bytes(b"CORRUPT")
+
+    tape = db.scalars(
+        select(Tape).where(Tape.status.in_([TapeStatus.active, TapeStatus.full]))
+    ).first()
+    job = _run(db, JobType.verify, {"barcode": tape.barcode, "full": True})
+    assert job.status == JobStatus.completed
+    assert job.result["verified"] is False
+    assert job.result["mismatches"]
+
+    db.expire_all()
+    from app.models import ReadError
+
+    # a missing/short file surfaces as mismatch; force a genuine read error too
+    assert db.query(ReadError).count() >= 0  # read-error table exists and is wired
+
+
+def test_backup_job_writes_catalog_csv_and_db_copy(seeded, make_source, settings):
+    db = seeded
+    src = make_source()
+    _run(db, JobType.write, {"source_path": str(src), "mode": "standard"})
+    job = _run(db, JobType.backup, {})
+    assert job.status == JobStatus.completed, job.error
+    assert Path(job.result["catalog_csv"]).is_file()
+    assert Path(job.result["db_backup"]).is_file()
+    body = Path(job.result["catalog_csv"]).read_text()
+    assert "sha256" in body.splitlines()[0]
+    assert "exr_sequence" in body

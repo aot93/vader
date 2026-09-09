@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Restore {{ req.id }}{% endblock %}
+{% block body %}
+<h1>Restore request {{ req.id }} <span class="pill {{ req.status.value }}">{{ req.status.value }}</span></h1>
+<p class="tag">Requested {{ req.requested_at | dt }} by {{ req.requested_by }} ·
+   destination <span class="mono">{{ req.destination_path }}</span> ·
+   manifests {{ 'INCLUDED (review copy)' if req.include_manifests else 'excluded' }}</p>
+
+{% if req.warnings %}
+<div class="warnbox">
+  <strong>Warnings — resolve before running:</strong>
+  <ul>{% for w in req.warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<h2>Selected content</h2>
+<div class="panel">
+  <table>
+    <tr><th>Kind</th><th>Item</th><th>Source path</th></tr>
+    {% for s in seqs %}<tr><td>sequence</td><td>{{ s.project_name }} / {{ s.sequence_name or '' }} / {{ s.shot_name }}</td><td class="mono">{{ s.source_path }}</td></tr>{% endfor %}
+    {% for it in items %}<tr><td>{{ it.content_type.value }}</td><td>{{ it.project_name or '' }} / {{ it.filename }}</td><td class="mono">{{ it.source_path }}</td></tr>{% endfor %}
+  </table>
+</div>
+
+<h2>Plan — tapes in load order</h2>
+{% for t in req.plan.get('tapes', []) %}
+<div class="panel">
+  <strong><a href="/tapes/{{ t.barcode }}">{{ t.barcode }}</a></strong>
+  <span class="pill {{ t.status }}">{{ t.status }}</span>
+  {% if t.in_library %}<span class="tag">in library{% if t.slot is not none %}, slot {{ t.slot }}{% endif %}</span>
+  {% else %}<span class="pill damaged">NOT IN LIBRARY</span> <span class="tag">{{ t.location }}</span>{% endif %}
+  <table>
+    <tr><th>Kind</th><th>Item</th><th>LTFS path</th><th>→ destination (relative)</th><th>Part</th></tr>
+    {% for f in t.files %}
+    <tr><td>{{ f.kind }}</td><td>{{ f.label }}</td><td class="mono">{{ f.ltfs_path }}</td>
+        <td class="mono">{{ f.dest_rel }}</td>
+        <td>{% if f.part_count and f.part_count > 1 %}{{ f.part_index + 1 }}/{{ f.part_count }}{% else %}—{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endfor %}
+
+<h2>Command preview</h2>
+<pre class="plan">{% for c in req.plan.get('commands_preview', []) %}{{ c }}
+{% endfor %}</pre>
+<p class="tag">Manifest sidecar paths (<code>_manifests/</code>, <code>_catalog/</code>) are excluded from
+   restored output unconditionally.</p>
+
+{% if job %}
+<h2>Restore job</h2>
+<div class="panel">{% include "job_progress_partial.html" %}</div>
+<p><a class="btn ghost" href="/jobs/{{ job.id }}">Open job {{ job.id }}</a></p>
+{% endif %}
+
+<p>
+{% if req.status.value in ['ready','pending','failed'] %}
+  <form class="inline" method="post" action="/restores/{{ req.id }}/run">
+    <button {% if req.status.value == 'pending' %}class="danger"{% endif %}>
+      {% if req.status.value == 'pending' %}Run anyway (warnings unresolved){% else %}Run restore{% endif %}
+    </button>
+  </form>
+{% endif %}
+  <a class="btn ghost" href="/restores">Back</a>
+</p>
+{% endblock %}

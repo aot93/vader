@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}{{ tape.barcode }}{% endblock %}
+{% block body %}
+<h1><code>{{ tape.barcode }}</code> <span class="pill {{ tape.status.value }}">{{ tape.status.value }}</span></h1>
+
+<div class="grid cols-2">
+  <div class="panel">
+    <h2 style="margin-top:0">Details</h2>
+    <table>
+      <tr><th>LTO generation</th><td>{{ tape.lto_generation or '—' }}</td></tr>
+      <tr><th>Capacity (native)</th><td>{{ tape.capacity_native_bytes | bytes }}</td></tr>
+      <tr><th>Used</th><td>{{ tape.used_bytes | bytes }} ({{ tape.free_bytes | bytes }} free)</td></tr>
+      <tr><th>Write passes</th><td>{{ tape.write_pass_count }}</td></tr>
+      <tr><th>First written</th><td>{{ tape.first_written_at | dt }}</td></tr>
+      <tr><th>Last written</th><td>{{ tape.last_written_at | dt }}</td></tr>
+      <tr><th>Last verified</th><td>{{ tape.last_verified_at | dt }}</td></tr>
+      <tr><th>Location</th><td>{{ tape.physical_location or '—' }}</td></tr>
+      <tr><th>Dedicated to</th><td>{{ tape.dedicated_source_machine or '—' }}</td></tr>
+      <tr><th>Notes</th><td style="white-space:pre-wrap">{{ tape.notes or '—' }}</td></tr>
+    </table>
+    <p style="margin-top:12px">
+      <a class="btn ghost" href="/export/tape/{{ tape.barcode }}.csv">Export tape CSV</a>
+      <form class="inline" method="post" action="/jobs/new/verify">
+        <input type="hidden" name="barcode" value="{{ tape.barcode }}">
+        <button class="ghost">Queue verify</button>
+      </form>
+    </p>
+  </div>
+  <div class="panel">
+    <h2 style="margin-top:0">Edit</h2>
+    <form method="post" action="/tapes/{{ tape.barcode }}/edit">
+      <label>LTO generation</label><input type="text" name="lto_generation" value="{{ tape.lto_generation or '' }}">
+      <label>Capacity native (bytes)</label><input type="number" name="capacity_native_bytes" value="{{ tape.capacity_native_bytes or '' }}">
+      <label>Status</label>
+      <select name="status">{% for s in statuses %}<option value="{{ s }}" {% if s==tape.status.value %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+      <label>Physical location</label><input type="text" name="physical_location" value="{{ tape.physical_location or '' }}">
+      <label>Offsite pair barcode</label><input type="text" name="offsite_pair_barcode" placeholder="sibling tape barcode">
+      <label>Notes</label><textarea name="notes" rows="3">{{ tape.notes or '' }}</textarea>
+      <p><button>Save</button></p>
+    </form>
+  </div>
+</div>
+
+<h2>Contents ({{ rows|length }} spans)</h2>
+<div class="panel">
+<table>
+  <tr><th>Type</th><th>Item</th><th>LTFS path</th><th>Part</th><th>Size</th><th>SHA256</th><th>Written</th><th>Verified</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td>{{ r.kind }}</td>
+    <td>{{ r.title }}</td>
+    <td class="mono">{{ r.span.ltfs_path }}</td>
+    <td>{% if r.span.part_count > 1 %}{{ r.span.part_index + 1 }}/{{ r.span.part_count }}{% else %}—{% endif %}</td>
+    <td>{{ r.span.size_bytes | bytes }}</td>
+    <td class="mono">{{ (r.span.sha256 or '')[:16] }}</td>
+    <td class="tag">{{ r.span.written_at | dt }}</td>
+    <td class="tag">{{ r.span.verified_at | dt }}</td>
+  </tr>
+  {% else %}<tr><td colspan="8" class="muted">Nothing catalogued on this tape.</td></tr>{% endfor %}
+</table>
+</div>
+
+<div class="grid cols-2">
+  <div>
+    <h2>Read-error history</h2>
+    <div class="panel">
+      <table>
+        <tr><th>When</th><th>Op</th><th>Path</th><th>Error</th></tr>
+        {% for re in read_errors %}
+        <tr><td class="tag">{{ re.detected_at | dt }}</td><td>{{ re.operation }}</td>
+            <td class="mono">{{ re.ltfs_path or '' }}</td><td>{{ re.error_text }}</td></tr>
+        {% else %}<tr><td colspan="4" class="muted">No read errors recorded.</td></tr>{% endfor %}
+      </table>
+    </div>
+  </div>
+  <div>
+    <h2>Event history</h2>
+    <div class="panel">
+      <table>
+        <tr><th>When</th><th>Event</th><th>Drive/Slot</th><th>Result</th></tr>
+        {% for e in events %}
+        <tr><td class="tag">{{ e.started_at | dt }}</td><td>{{ e.event_type.value }}</td>
+            <td>{{ e.drive_number if e.drive_number is not none else '' }}{% if e.slot_number is not none %} / {{ e.slot_number }}{% endif %}</td>
+            <td><span class="pill {{ e.result.value }}">{{ e.result.value }}</span>{% if e.error_detail %}<div class="tag">{{ e.error_detail }}</div>{% endif %}</td></tr>
+        {% else %}<tr><td colspan="4" class="muted">No events.</td></tr>{% endfor %}
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

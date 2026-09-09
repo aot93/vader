@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Register tape{% endblock %}
+{% block body %}
+<h1>Register a tape</h1>
+<div class="panel" style="max-width:520px">
+<form method="post" action="/tapes/new">
+  <label>Barcode *</label><input type="text" name="barcode" required>
+  <label>LTO generation</label><input type="text" name="lto_generation" placeholder="LTO-8">
+  <label>Native capacity (bytes)</label><input type="number" name="capacity_native_bytes" placeholder="12000000000000">
+  <label>Status</label>
+  <select name="status">{% for s in statuses %}<option value="{{ s }}" {% if s=='scratch' %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+  <label>Physical location</label><input type="text" name="physical_location" placeholder="slot 4 / shelf B box 2">
+  <label>Notes</label><textarea name="notes" rows="3"></textarea>
+  <p><button>Create</button> <a class="btn ghost" href="/tapes">Cancel</a></p>
+</form>
+</div>
+{% endblock %}

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Vader{% endblock %} · Tape Archive Control</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/htmx.min.js" defer></script>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">▚ VADER</a>
+  <nav>
+    <a href="/">Dashboard</a>
+    <a href="/library">Library</a>
+    <a href="/tapes">Tapes</a>
+    <a href="/search">Search &amp; Restore</a>
+    <a href="/jobs">Jobs</a>
+    <a href="/restores">Restores</a>
+    <a href="/audit">Audit</a>
+  </nav>
+  <span class="spacer"></span>
+  <a class="muted" href="/export/catalog.csv">catalog.csv</a>
+  {% if request.session.get('authed') %}<a class="muted" href="/logout">log out</a>{% endif %}
+</header>
+
+<main>
+  {% if notice %}<div class="flash ok">{{ notice }}</div>{% endif %}
+  {% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+  {% block body %}{% endblock %}
+</main>
+
+<footer class="muted">
+  Vader · internal tape-archive control · once-a-year tool, permanent catalog
+</footer>
+</body>
+</html>

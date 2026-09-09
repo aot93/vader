@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Restores{% endblock %}
+{% block body %}
+<h1>Restore requests</h1>
+<p class="muted">Prepared from <a href="/search">Search &amp; Restore</a>.</p>
+<div class="panel">
+<table>
+  <tr><th>#</th><th>Requested</th><th>By</th><th>Scope</th><th>Status</th><th>Warnings</th><th>Destination</th></tr>
+  {% for r in reqs %}
+  <tr>
+    <td><a href="/restores/{{ r.id }}">{{ r.id }}</a></td>
+    <td class="tag">{{ r.requested_at | dt }}</td>
+    <td>{{ r.requested_by }}</td>
+    <td class="tag">{{ r.sequence_container_ids|length }} seq · {{ r.content_item_ids|length }} item</td>
+    <td><span class="pill {{ r.status.value }}">{{ r.status.value }}</span></td>
+    <td class="tag">{{ r.warnings|length }}</td>
+    <td class="mono tag">{{ r.destination_path or '—' }}</td>
+  </tr>
+  {% else %}<tr><td colspan="7" class="muted">No restore requests.</td></tr>{% endfor %}
+</table>
+</div>
+{% endblock %}

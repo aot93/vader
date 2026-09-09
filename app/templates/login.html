@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Log in{% endblock %}
+{% block body %}
+<h1>Log in</h1>
+<div class="panel" style="max-width:380px">
+  {% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+  <form method="post" action="/login">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label>Shared token</label>
+    <input type="password" name="token" autofocus required>
+    <p><button>Log in</button></p>
+  </form>
+</div>
+{% endblock %}

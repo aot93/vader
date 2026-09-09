@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Jobs{% endblock %}
+{% block body %}
+<h1>Jobs</h1>
+<p>
+  <a class="btn ghost" href="/jobs/new/write">+ Write job</a>
+  <form class="inline" method="post" action="/jobs/new/backup"><button class="ghost">Run catalog backup + CSV export</button></form>
+</p>
+<div class="panel">
+<table>
+  <tr><th>#</th><th>Type</th><th>Status</th><th>Progress</th><th>Created</th><th>Finished</th><th>Summary</th></tr>
+  {% for j in jobs %}
+  <tr>
+    <td><a href="/jobs/{{ j.id }}">{{ j.id }}</a></td>
+    <td>{{ j.job_type.value }}</td>
+    <td><span class="pill {{ j.status.value }}">{{ j.status.value }}</span></td>
+    <td style="min-width:150px">
+      <div class="bar"><span style="width: {{ j.progress_pct }}%"></span></div>
+      <div class="tag">{{ j.progress_message }}</div>
+    </td>
+    <td class="tag">{{ j.created_at | dt }}</td>
+    <td class="tag">{{ j.finished_at | dt }}</td>
+    <td class="tag">
+      {% if j.error %}<span class="pill err">error</span>{% elif j.result %}{{ j.result.get('tapes') or j.result.get('barcode') or j.result.get('files_restored') or 'ok' }}{% endif %}
+    </td>
+  </tr>
+  {% else %}<tr><td colspan="7" class="muted">No jobs yet.</td></tr>{% endfor %}
+</table>
+</div>
+{% endblock %}

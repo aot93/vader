@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block body %}
+<h1>Dashboard</h1>
+<p class="muted">Hardware backend: <code>{{ hw_backend }}</code></p>
+
+{% if hw_error %}<div class="flash err">Library unreachable: {{ hw_error }}</div>{% endif %}
+
+<div class="grid cols-4">
+  <div class="stat"><div class="n">{{ counts.active + counts.full }}</div><div class="l">written tapes</div></div>
+  <div class="stat"><div class="n">{{ counts.scratch }}</div><div class="l">scratch tapes</div></div>
+  <div class="stat"><div class="n">{{ totals.sequences }}</div><div class="l">sequences</div></div>
+  <div class="stat"><div class="n">{{ totals.items }}</div><div class="l">content items</div></div>
+</div>
+<p class="muted" style="margin-top:8px">Catalogued: {{ totals.bytes | bytes }} across {{ totals.spans }} tape spans.</p>
+
+{% if reverify_due %}
+<div class="warnbox" style="margin-top:16px">
+  <strong>{{ reverify_due|length }} tape(s) due for spot re-verification</strong> (not verified within the window):
+  {% for t in reverify_due %}
+    <a href="/tapes/{{ t.barcode }}">{{ t.barcode }}</a> (last: {{ t.last_verified_at | timeago }}){% if not loop.last %}, {% endif %}
+  {% endfor %}
+  <form class="inline" method="post" action="/jobs/new/verify" style="margin-left:8px">
+    <input type="hidden" name="barcode" value="{{ reverify_due[0].barcode }}">
+    <button class="ghost">Verify {{ reverify_due[0].barcode }}</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="grid cols-2">
+  <div>
+    <h2>Library</h2>
+    <div class="panel">
+      {% if state %}
+      <div class="libmap">
+        {% for d in state.drives %}
+          <div class="slot drive">
+            <div class="b">drive {{ d.number }}</div>
+            <div>{{ d.loaded_barcode or 'empty' }}</div>
+            <div class="tag">{{ d.activity }}</div>
+          </div>
+        {% endfor %}
+        {% for s in state.slots %}
+          <div class="slot {% if not s.barcode %}empty{% endif %}">
+            <div class="b">slot {{ s.number }}</div>
+            <div>{{ s.barcode or '—' }}</div>
+            {% if s.is_cleaning_tape %}<div class="tag">cleaning</div>{% endif %}
+          </div>
+        {% endfor %}
+      </div>
+      <p style="margin-top:10px"><a class="btn ghost" href="/library">Open library controls</a></p>
+      {% else %}<p class="muted">No library state.</p>{% endif %}
+    </div>
+  </div>
+  <div>
+    <h2>Jobs in flight</h2>
+    <div class="panel">
+      {% if active_jobs %}
+      <table>
+        <tr><th>#</th><th>type</th><th>status</th><th>progress</th></tr>
+        {% for j in active_jobs %}
+        <tr>
+          <td><a href="/jobs/{{ j.id }}">{{ j.id }}</a></td>
+          <td>{{ j.job_type.value }}</td>
+          <td><span class="pill {{ j.status.value }}">{{ j.status.value }}</span></td>
+          <td style="min-width:160px">
+            <div class="bar"><span style="width: {{ j.progress_pct }}%"></span></div>
+            <div class="tag">{{ j.progress_message }}</div>
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}<p class="muted">Nothing running. <a href="/jobs/new/write">Start a write job →</a></p>{% endif %}
+    </div>
+    <h2>Recent tape events</h2>
+    <div class="panel">
+      <table>
+        {% for e in recent_events %}
+        <tr>
+          <td class="tag">{{ e.started_at | timeago }}</td>
+          <td>{{ e.event_type.value }}</td>
+          <td>{% if e.tape_id and tape_by_barcode %}{% for b,t in tape_by_barcode.items() if t.id==e.tape_id %}<a href="/tapes/{{ b }}">{{ b }}</a>{% endfor %}{% endif %}</td>
+          <td><span class="pill {{ e.result.value }}">{{ e.result.value }}</span></td>
+        </tr>
+        {% else %}<tr><td class="muted">No events yet.</td></tr>{% endfor %}
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Job {{ job.id }}{% endblock %}
+{% block body %}
+<h1>Job {{ job.id }} — {{ job.job_type.value }}</h1>
+
+<div class="panel">
+  {% include "job_progress_partial.html" %}
+</div>
+
+<h2>Parameters</h2>
+<pre class="plan">{{ job.params | tojson(indent=2) }}</pre>
+
+{% if job.result %}
+<h2>Result</h2>
+<pre class="plan">{{ job.result | tojson(indent=2) }}</pre>
+{% endif %}
+
+{% if job.error %}
+<h2>Error</h2>
+<pre class="plan">{{ job.error }}</pre>
+{% endif %}
+
+<p>
+  {% if job.status.value in ['queued','running'] %}
+  <form class="inline" method="post" action="/jobs/{{ job.id }}/cancel"><button class="danger">Request cancel</button></form>
+  {% endif %}
+  {% if job.status.value in ['failed','interrupted','cancelled','completed'] %}
+  <form class="inline" method="post" action="/jobs/{{ job.id }}/retry"><button class="ghost">Re-run with same parameters</button></form>
+  {% endif %}
+  <a class="btn ghost" href="/jobs">Back to jobs</a>
+</p>
+{% endblock %}

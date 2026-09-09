@@ -1,0 +1,7 @@
+<div {% if job.status.value in ['queued','running'] %}hx-get="/jobs/{{ job.id }}?partial=1" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <p>Status: <span class="pill {{ job.status.value }}">{{ job.status.value }}</span>
+     {% if job.heartbeat_at %}<span class="tag">heartbeat {{ job.heartbeat_at | timeago }}</span>{% endif %}</p>
+  <div class="bar"><span style="width: {{ job.progress_pct }}%"></span></div>
+  <p class="tag">{{ job.progress_current }} / {{ job.progress_total }} — {{ job.progress_message }}</p>
+  <p class="tag">created {{ job.created_at | dt }}{% if job.started_at %} · started {{ job.started_at | dt }}{% endif %}{% if job.finished_at %} · finished {{ job.finished_at | dt }}{% endif %}</p>
+</div>
