@@ -20,6 +20,7 @@ from app.routers import (
     auth_routes,
     dashboard,
     export,
+    help,
     jobs,
     library,
     restores,
@@ -86,6 +87,7 @@ app.include_router(jobs.router)
 app.include_router(restores.router)
 app.include_router(export.router)
 app.include_router(audit.router)
+app.include_router(help.router)
 
 
 @app.exception_handler(404)

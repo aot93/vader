@@ -59,6 +59,7 @@ anything else is false.
 |---|---|---|
 | `DATA_DIR` | `./data` (resolved to absolute) | Working directory. Holds `manifests/`, `exports/`, `sim/`, and default `restores/` output. |
 | `BACKUP_DIR` | `./data/backups` (resolved) | Where the backup job and `scripts/backup.sh` write the DB dump and full-catalog CSV. **Point at the network share for a real run.** |
+| `MANUAL_DIR` | `<repo>/user-manual` (resolved) | Directory of Markdown files rendered live at **Help** (`/help`). Change only if you deploy the manual separately from the app. |
 
 ---
 

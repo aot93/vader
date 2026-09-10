@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ page.title }} · Help{% endblock %}
+{% block body %}
+<div class="manual">
+  <nav class="manual-nav panel">
+    <div class="b">User manual</div>
+    <ul>
+      {% for p in pages %}
+      <li>
+        <a href="/help/{{ p.slug }}"
+           {% if p.slug == current %}class="active" aria-current="page"{% endif %}>{{ p.title }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="tag">Rendered live from <code>user-manual/{{ current }}.md</code></p>
+  </nav>
+  <article class="manual-body panel">
+    {{ page.html | safe }}
+  </article>
+</div>
+{% endblock %}

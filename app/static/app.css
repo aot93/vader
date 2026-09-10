@@ -92,3 +92,50 @@ button.danger, .btn.danger { background: transparent; border-color: var(--err); 
 .warnbox { border: 1px solid var(--warn); background: rgba(245,196,81,.1); padding: 10px 14px; border-radius: 8px; }
 pre.plan { background: #0f1216; border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow: auto; font-size: 12px; }
 .tag { font-size: 11px; color: var(--muted); }
+
+/* --- User manual (/help) ------------------------------------------------- */
+.manual { display: flex; gap: 20px; align-items: flex-start; }
+.manual-nav { width: 232px; flex: none; position: sticky; top: 16px; }
+.manual-nav .b { font-weight: 700; margin-bottom: 8px; }
+.manual-nav ul { list-style: none; margin: 0; padding: 0; }
+.manual-nav li { margin: 2px 0; }
+.manual-nav a { display: block; padding: 4px 8px; border-radius: 6px; font-size: 13px; color: var(--ink); }
+.manual-nav a:hover { background: var(--panel-2); text-decoration: none; }
+.manual-nav a.active { background: var(--panel-2); color: var(--accent); font-weight: 600; }
+.manual-nav p.tag { margin: 10px 0 0; }
+.manual-body { flex: 1; min-width: 0; }
+.manual-body > :first-child { margin-top: 0; }
+.manual-body h1 { font-size: 22px; margin: 0 0 12px; }
+.manual-body h2 {
+  font-size: 16px; margin: 28px 0 10px; text-transform: none; letter-spacing: 0;
+  color: var(--ink); border-bottom: 1px solid var(--line); padding-bottom: 4px;
+}
+.manual-body h3 { font-size: 14px; margin: 20px 0 8px; text-transform: none; color: var(--ink); }
+.manual-body p, .manual-body li { line-height: 1.65; }
+.manual-body ul, .manual-body ol { padding-left: 22px; }
+.manual-body code {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
+  padding: 1px 5px; font-size: 12.5px;
+}
+.manual-body pre {
+  background: #0f1216; border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px; overflow: auto; font-size: 12.5px;
+}
+.manual-body pre code { background: none; border: 0; padding: 0; }
+.manual-body table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+.manual-body th, .manual-body td {
+  border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; font-size: 13px;
+}
+.manual-body th { background: var(--panel-2); }
+.manual-body blockquote {
+  margin: 14px 0; padding: 8px 14px; border-left: 3px solid var(--warn);
+  background: rgba(245,196,81,.08); border-radius: 0 6px 6px 0;
+}
+.manual-body blockquote > :first-child { margin-top: 0; }
+.manual-body blockquote > :last-child { margin-bottom: 0; }
+.manual-body img { max-width: 100%; border: 1px solid var(--line); border-radius: 8px; }
+.manual-body hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
+@media (max-width: 820px) {
+  .manual { flex-direction: column; }
+  .manual-nav { width: 100%; position: static; }
+}

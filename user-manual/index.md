@@ -15,6 +15,10 @@ This manual describes the application **as it actually behaves in the code**. Wh
 the original framework design document and the running software differ, the manual
 follows the software and notes the difference.
 
+The manual is also available inside the app: the **Help** link in the top bar
+renders these same Markdown files live, so what you read in-app always matches the
+version deployed.
+
 ---
 
 ## Who this manual is for

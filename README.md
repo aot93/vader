@@ -112,9 +112,15 @@ app/
     restore.py          prepare a guided restore plan, then execute it
     export_csv.py        per-tape and full-catalog CSV
     library.py           mtx/ltfs actions, each logged as a tape event
+    manual.py            render user-manual/*.md live for the in-app Help page
   jobs/                 persisted background worker
   routers/  templates/  static/    the web UI
 migrations/             Alembic
 scripts/               backup.sh, dev_seed.py
+user-manual/           operator manual (Markdown) — served in-app at /help
 tests/
 ```
+
+The **Help** link in the top bar renders `user-manual/*.md` at request time
+(`MANUAL_DIR`, default `./user-manual`), so the in-app docs never drift from the
+checked-in source.

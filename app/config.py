@@ -72,6 +72,12 @@ class Settings:
     data_dir: Path = Path(os.environ.get("DATA_DIR", "./data")).resolve()
     backup_dir: Path = Path(os.environ.get("BACKUP_DIR", "./data/backups")).resolve()
 
+    # The Markdown user manual, rendered live at /help so the pages never drift
+    # from the checked-in source. Defaults to the repo's user-manual/ directory.
+    manual_dir: Path = Path(
+        os.environ.get("MANUAL_DIR", str(Path(__file__).resolve().parent.parent / "user-manual"))
+    ).resolve()
+
     reverify_months: int = _int("REVERIFY_MONTHS", 12)
     default_verify_sample_fraction: float = _float("DEFAULT_VERIFY_SAMPLE_FRACTION", 0.1)
     write_readback_verify: bool = _bool("WRITE_READBACK_VERIFY", True)

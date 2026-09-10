@@ -3,6 +3,7 @@
 fastapi
 uvicorn[standard]
 jinja2
+markdown
 python-multipart
 itsdangerous
 sqlalchemy>=2.0
