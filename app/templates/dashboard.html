@@ -7,12 +7,12 @@
 {% if hw_error %}<div class="flash err">Library unreachable: {{ hw_error }}</div>{% endif %}
 
 <div class="grid cols-4">
-  <div class="stat"><div class="n">{{ counts.active + counts.full }}</div><div class="l">written tapes</div></div>
+  <div class="stat"><div class="n">{{ counts.active + counts.full + counts.archived }}</div><div class="l">written tapes</div></div>
   <div class="stat"><div class="n">{{ counts.scratch }}</div><div class="l">scratch tapes</div></div>
-  <div class="stat"><div class="n">{{ totals.sequences }}</div><div class="l">sequences</div></div>
-  <div class="stat"><div class="n">{{ totals.items }}</div><div class="l">content items</div></div>
+  <div class="stat"><div class="n">{{ totals['sequences'] }}</div><div class="l">sequences</div></div>
+  <div class="stat"><div class="n">{{ totals['items'] }}</div><div class="l">content items</div></div>
 </div>
-<p class="muted" style="margin-top:8px">Catalogued: {{ totals.bytes | bytes }} across {{ totals.spans }} tape spans.</p>
+<p class="muted" style="margin-top:8px">Catalogued: {{ totals['bytes'] | bytes }} across {{ totals['spans'] }} tape spans.{% if counts.archived %} {{ counts.archived }} tape(s) archived offsite.{% endif %}</p>
 
 {% if reverify_due %}
 <div class="warnbox" style="margin-top:16px">
@@ -24,6 +24,7 @@
     <input type="hidden" name="barcode" value="{{ reverify_due[0].barcode }}">
     <button class="ghost">Verify {{ reverify_due[0].barcode }}</button>
   </form>
+  <a class="btn ghost" href="/jobs/new/verify?barcode={{ reverify_due[0].barcode }}">options…</a>
 </div>
 {% endif %}
 

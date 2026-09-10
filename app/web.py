@@ -51,3 +51,20 @@ templates.env.filters["bytes"] = format_bytes
 templates.env.filters["dt"] = format_dt
 templates.env.filters["timeago"] = timeago
 templates.env.globals["now"] = lambda: datetime.now(UTC)
+
+
+def paginate(total: int, page: int, per_page: int = 50) -> dict:
+    """Clamp ``page`` to a valid range and return the slice + nav flags a list
+    view needs. ``offset``/``per_page`` feed straight into a SQL LIMIT/OFFSET."""
+    per_page = max(1, per_page)
+    pages = max(1, (total + per_page - 1) // per_page)
+    page = min(max(1, page), pages)
+    return {
+        "page": page,
+        "pages": pages,
+        "per_page": per_page,
+        "offset": (page - 1) * per_page,
+        "total": total,
+        "has_prev": page > 1,
+        "has_next": page < pages,
+    }

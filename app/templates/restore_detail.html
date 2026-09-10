@@ -53,12 +53,17 @@
 {% endif %}
 
 <p>
-{% if req.status.value in ['ready','pending','failed'] %}
+{% if blocked_warnings %}
+  <span class="pill damaged">Cannot run yet</span>
+  <span class="tag">Fetch the tape(s) that are not in the library, run an inventory on the
+    <a href="/library">library</a> page, then prepare a new restore.</span>
+{% elif req.status.value in ['ready','pending','failed'] %}
   <form class="inline" method="post" action="/restores/{{ req.id }}/run">
-    <button {% if req.status.value == 'pending' %}class="danger"{% endif %}>
-      {% if req.status.value == 'pending' %}Run anyway (warnings unresolved){% else %}Run restore{% endif %}
+    <button {% if req.warnings %}class="danger"{% endif %}>
+      {% if req.warnings %}Run despite warnings{% else %}Run restore{% endif %}
     </button>
   </form>
+  {% if req.warnings %}<span class="tag">A DAMAGED tape will be attempted; unreadable files are reported individually.</span>{% endif %}
 {% endif %}
   <a class="btn ghost" href="/restores">Back</a>
 </p>

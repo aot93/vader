@@ -1,0 +1,11 @@
+{# expects: pager (dict from app.web.paginate); optional: qs (query-string prefix
+   ending in '&' or ''), param (page-number query key, default 'page') #}
+{% set _p = param | default('page', true) %}
+{% set _qs = qs | default('', true) %}
+{% if pager and pager.pages > 1 %}
+<p class="tag" style="margin-top:10px">
+  {% if pager.has_prev %}<a href="?{{ _qs }}{{ _p }}={{ pager.page - 1 }}">‹ Prev</a>{% else %}<span class="muted">‹ Prev</span>{% endif %}
+  · Page {{ pager.page }} of {{ pager.pages }} ({{ pager.total }} total) ·
+  {% if pager.has_next %}<a href="?{{ _qs }}{{ _p }}={{ pager.page + 1 }}">Next ›</a>{% else %}<span class="muted">Next ›</span>{% endif %}
+</p>
+{% endif %}

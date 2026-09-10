@@ -4,6 +4,7 @@
 <h1>Jobs</h1>
 <p>
   <a class="btn ghost" href="/jobs/new/write">+ Write job</a>
+  <a class="btn ghost" href="/jobs/new/verify">+ Verify job</a>
   <form class="inline" method="post" action="/jobs/new/backup"><button class="ghost">Run catalog backup + CSV export</button></form>
 </p>
 <div class="panel">
@@ -26,5 +27,6 @@
   </tr>
   {% else %}<tr><td colspan="7" class="muted">No jobs yet.</td></tr>{% endfor %}
 </table>
+{% include "_pager.html" %}
 </div>
 {% endblock %}

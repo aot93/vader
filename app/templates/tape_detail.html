@@ -22,8 +22,9 @@
       <a class="btn ghost" href="/export/tape/{{ tape.barcode }}.csv">Export tape CSV</a>
       <form class="inline" method="post" action="/jobs/new/verify">
         <input type="hidden" name="barcode" value="{{ tape.barcode }}">
-        <button class="ghost">Queue verify</button>
+        <button class="ghost">Quick verify (sample)</button>
       </form>
+      <a class="btn ghost" href="/jobs/new/verify?barcode={{ tape.barcode }}">Verify options…</a>
     </p>
   </div>
   <div class="panel">

@@ -191,7 +191,7 @@ def format_tape(db: Session, drive: int, barcode: str, *, force: bool = False,
 def retire_tape(db: Session, barcode: str, *, reason: str = "", initiated_by: str = "operator") -> None:
     tape = _tape_by_barcode(db, barcode)
     if not tape:
-        raise HardwareError(f"unknown tape {barcode}")
+        raise ValueError(f"unknown tape {barcode}")
     tape.status = TapeStatus.retired
     if reason:
         tape.notes = f"{(tape.notes + chr(10)) if tape.notes else ''}retired: {reason}"

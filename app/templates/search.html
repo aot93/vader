@@ -22,7 +22,7 @@
     </div>
     <div><label>Content type</label>
       <select name="content_type"><option value="">any</option>
-        {% for c in content_types %}<option value="{{ c }}" {% if c==filters.content_type %}selected{% endif %}>{{ c }}</option>{% endfor %}
+        {% for value, label in content_types %}<option value="{{ value }}" {% if value==filters.content_type %}selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>
     </div>
     <div><label>Tape barcode</label><input type="text" name="tape_barcode" value="{{ filters.tape_barcode or '' }}"></div>

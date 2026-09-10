@@ -225,8 +225,6 @@ def tapes_due_for_reverification(db: Session):
     cutoff = _now() - timedelta(days=30 * settings.reverify_months)
     out = []
     for tape in db.scalars(select(Tape)).all():
-        if tape.status in {"scratch", "retired"}:
-            continue
         if tape.status.value in {"scratch", "retired"}:
             continue
         if tape.last_written_at is None:

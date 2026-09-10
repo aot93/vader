@@ -2,22 +2,28 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import require_auth
 from app.db import get_db
 from app.jobs import enqueue
 from app.models import ContentItem, Job, JobType, RestoreRequest, SequenceContainer
-from app.web import templates
+from app.web import paginate, templates
 
 router = APIRouter(prefix="/restores", dependencies=[Depends(require_auth)])
 
 
 @router.get("")
-def list_restores(request: Request, db: Session = Depends(get_db)):
-    reqs = db.scalars(select(RestoreRequest).order_by(RestoreRequest.requested_at.desc())).all()
-    return templates.TemplateResponse(request, "restores_list.html", {"reqs": reqs})
+def list_restores(request: Request, db: Session = Depends(get_db), page: int = 1):
+    total = db.scalar(select(func.count()).select_from(RestoreRequest))
+    pager = paginate(total, page, per_page=50)
+    reqs = db.scalars(
+        select(RestoreRequest).order_by(RestoreRequest.requested_at.desc())
+        .limit(pager["per_page"]).offset(pager["offset"])
+    ).all()
+    return templates.TemplateResponse(request, "restores_list.html",
+                                      {"reqs": reqs, "pager": pager, "qs": ""})
 
 
 @router.get("/{restore_id}")
@@ -34,8 +40,10 @@ def restore_detail(restore_id: int, request: Request, db: Session = Depends(get_
     job = None
     if req.plan.get("job_id"):
         job = db.get(Job, req.plan["job_id"])
+    blocked_warnings = [w for w in (req.warnings or []) if "not in the library" in w]
     return templates.TemplateResponse(request, "restore_detail.html", {
         "req": req, "seqs": seqs, "items": items, "job": job,
+        "blocked_warnings": blocked_warnings,
     })
 
 

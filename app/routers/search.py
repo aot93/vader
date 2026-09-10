@@ -51,7 +51,12 @@ def search_page(
         "hits": hits, "filters": filters, "has_query": has_query,
         "machines": distinct_source_machines(db),
         "categories": [c.value for c in BackupCategory],
-        "content_types": ["exr_sequence", "video_chunk", "config", "audio_media"],
+        "content_types": [
+            ("exr_sequence", "EXR image sequence (Type A)"),
+            ("video_chunk", "Video chunk (Type B)"),
+            ("config", "Config / log file (Type C)"),
+            ("audio_media", "Audio / media file (Type D)"),
+        ],
     })
 
 

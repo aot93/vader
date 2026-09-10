@@ -61,7 +61,7 @@ def upgrade() -> None:
 
     op.create_table('jobs',
     sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('job_type', sa.Enum('write', 'verify', 'restore', 'format', 'clean', 'inventory', 'backup', name='jobtype', native_enum=False, length=16), nullable=False),
+    sa.Column('job_type', sa.Enum('write', 'verify', 'restore', 'backup', name='jobtype', native_enum=False, length=16), nullable=False),
     sa.Column('status', sa.Enum('queued', 'running', 'completed', 'failed', 'cancelled', 'interrupted', name='jobstatus', native_enum=False, length=16), nullable=False),
     sa.Column('params', sa.JSON(), nullable=False),
     sa.Column('progress_current', sa.BigInteger(), nullable=False),

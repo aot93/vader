@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}New verify job{% endblock %}
+{% block body %}
+<h1>New verify job</h1>
+<div class="panel" style="max-width:640px">
+<form method="post" action="/jobs/new/verify">
+  <label>Tape barcode *</label>
+  <input type="text" name="barcode" value="{{ barcode }}" placeholder="TAPE0001L8" required>
+
+  <label class="tag" style="display:block;margin-top:12px">
+    <input type="checkbox" name="full" value="true"> Full verify — re-read and re-hash
+    <em>every</em> file the tape carries
+  </label>
+
+  <label>Sample fraction (ignored when "Full verify" is ticked)</label>
+  <input type="text" name="sample_fraction" placeholder="{{ default_fraction }}">
+  <p class="tag">Blank = the configured default ({{ default_fraction }}). e.g. <code>0.1</code>
+    spot-checks 10% of the tape's files, chosen deterministically from the barcode +
+    job id so a re-run re-checks the same set.</p>
+
+  <label>Drive</label><input type="number" name="drive" value="0">
+
+  <p class="tag">Runs in the background: load tape → mount LTFS → re-hash the selected
+    files → compare against the SHA256 recorded at write time. The original source is
+    never touched. Read errors are logged against the tape's history.</p>
+  <p><button>Queue verify job</button> <a class="btn ghost" href="/jobs">Cancel</a></p>
+</form>
+</div>
+{% endblock %}

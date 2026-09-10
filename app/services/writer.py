@@ -254,6 +254,7 @@ def run_write(
     total_bytes = sum(p.size_bytes for p in alloc.placements)
     done_bytes = 0
     mismatches: list[str] = []
+    mismatch_tapes: dict[int, int] = {}  # tape_id -> mismatch count
     tapes_written: set[int] = set()
 
     drv = _Drive(db, drive, job_id, actor)
@@ -265,6 +266,7 @@ def run_write(
             mount = drv.ensure(placement.barcode, needs_format=placement.needs_format)
             tape = db.scalar(select(Tape).where(Tape.id == placement.tape_id))
 
+            before = len(mismatches)
             if isinstance(unit, SequenceUnit):
                 span = _write_sequence_part(
                     db, unit, placement, mount, root, readback, mismatches, drv.n
@@ -272,6 +274,10 @@ def run_write(
             else:
                 span = _write_file_part(
                     db, unit, placement, mount, root, readback, mismatches, drv.n
+                )
+            if len(mismatches) > before:
+                mismatch_tapes[placement.tape_id] = (
+                    mismatch_tapes.get(placement.tape_id, 0) + len(mismatches) - before
                 )
             span.tape_id = placement.tape_id
             done_bytes += placement.size_bytes
@@ -288,6 +294,16 @@ def run_write(
         # finalise tapes
         for tape_id in tapes_written:
             _finalise_tape(db, tape_id)
+        # record any write-time read-back mismatch on the affected tape (§4.5) so
+        # a follow-up verify is prompted even if nobody reads the job result.
+        for tape_id, n in mismatch_tapes.items():
+            t = db.scalar(select(Tape).where(Tape.id == tape_id))
+            if t:
+                t.notes = (
+                    f"{(t.notes + chr(10)) if t.notes else ''}"
+                    f"{_now().date()}: write-time read-back found {n} checksum "
+                    f"mismatch(es) — re-verify this tape"
+                )
         db.commit()
 
         # per-tape CSV written onto the tape itself (§8) — best effort

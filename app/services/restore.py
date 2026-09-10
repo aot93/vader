@@ -200,9 +200,14 @@ def run_restore(
     req = db.get(RestoreRequest, restore_id)
     if not req:
         raise ValueError(f"unknown restore request {restore_id}")
-    blocking = [w for w in req.warnings if "not in the library" in w or "DAMAGED" in w]
+    # A tape that is physically absent is a hard stop — there is nothing to read.
+    # A DAMAGED-flagged tape is *not* blocked here: the operator has explicitly
+    # asked to attempt it, and any unreadable file is reported per-file below.
+    blocking = [w for w in req.warnings if "not in the library" in w]
     if blocking:
-        raise RuntimeError("restore blocked: " + "; ".join(blocking))
+        raise RuntimeError(
+            "restore blocked — required tape(s) not in the library: " + "; ".join(blocking)
+        )
 
     req.status = RestoreStatus.in_progress
     db.commit()

@@ -4,23 +4,29 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import require_auth
+from app.config import get_settings
 from app.db import get_db
 from app.jobs import enqueue
 from app.models import BackupCategory, Job, JobStatus, JobType
 from app.services.catalog import distinct_source_machines
-from app.web import templates
+from app.web import paginate, templates
 
 router = APIRouter(prefix="/jobs", dependencies=[Depends(require_auth)])
 
 
 @router.get("")
-def list_jobs(request: Request, db: Session = Depends(get_db)):
-    jobs = db.scalars(select(Job).order_by(Job.created_at.desc()).limit(100)).all()
-    return templates.TemplateResponse(request, "jobs_list.html", {"jobs": jobs})
+def list_jobs(request: Request, db: Session = Depends(get_db), page: int = 1):
+    total = db.scalar(select(func.count()).select_from(Job))
+    pager = paginate(total, page, per_page=50)
+    jobs = db.scalars(
+        select(Job).order_by(Job.created_at.desc())
+        .limit(pager["per_page"]).offset(pager["offset"])
+    ).all()
+    return templates.TemplateResponse(request, "jobs_list.html", {"jobs": jobs, "pager": pager, "qs": ""})
 
 
 @router.get("/new/write")
@@ -60,6 +66,14 @@ def create_write_job(
     return RedirectResponse(f"/jobs/{job.id}", status_code=303)
 
 
+@router.get("/new/verify")
+def new_verify_job(request: Request, barcode: str = ""):
+    return templates.TemplateResponse(request, "job_verify_form.html", {
+        "barcode": barcode.strip(),
+        "default_fraction": get_settings().default_verify_sample_fraction,
+    })
+
+
 @router.post("/new/verify")
 def create_verify_job(
     request: Request,
@@ -69,10 +83,16 @@ def create_verify_job(
     sample_fraction: str = Form(""),
     drive: int = Form(0),
 ):
+    try:
+        frac = float(sample_fraction) if sample_fraction.strip() else None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="sample fraction must be a number") from exc
+    if frac is not None and not 0 < frac <= 1:
+        raise HTTPException(status_code=400, detail="sample fraction must be between 0 and 1")
     params = {
         "barcode": barcode.strip(),
         "full": full,
-        "sample_fraction": float(sample_fraction) if sample_fraction.strip() else None,
+        "sample_fraction": frac,
         "drive": drive,
     }
     job = enqueue(db, JobType.verify, params)

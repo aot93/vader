@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -103,6 +103,9 @@ def do_retire(request: Request, barcode: str = Form(...), reason: str = Form("")
         lib.retire_tape(db, barcode.strip(), reason=reason.strip(), initiated_by="operator")
         db.commit()
         return RedirectResponse(f"/tapes/{barcode.strip()}", status_code=303)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except HardwareError as exc:
         db.rollback()
         return _render(request, db, error=str(exc))

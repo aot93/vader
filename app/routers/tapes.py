@@ -17,17 +17,22 @@ from app.models import (
     TapeStatus,
 )
 from app.services.audit import record_audit
-from app.web import templates
+from app.web import paginate, templates
 
 router = APIRouter(prefix="/tapes", dependencies=[Depends(require_auth)])
 
 
 @router.get("")
-def list_tapes(request: Request, db: Session = Depends(get_db), status: str | None = None):
-    stmt = select(Tape).order_by(Tape.barcode)
+def list_tapes(request: Request, db: Session = Depends(get_db), status: str | None = None,
+               page: int = 1):
+    base = select(Tape)
     if status:
-        stmt = stmt.where(Tape.status == status)
-    tapes = db.scalars(stmt).all()
+        base = base.where(Tape.status == status)
+    total = db.scalar(select(func.count()).select_from(base.subquery()))
+    pager = paginate(total, page, per_page=50)
+    tapes = db.scalars(
+        base.order_by(Tape.barcode).limit(pager["per_page"]).offset(pager["offset"])
+    ).all()
     span_counts = dict(
         db.execute(
             select(ContentTapeSpan.tape_id, func.count()).group_by(ContentTapeSpan.tape_id)
@@ -36,6 +41,7 @@ def list_tapes(request: Request, db: Session = Depends(get_db), status: str | No
     return templates.TemplateResponse(request, "tapes_list.html", {
         "tapes": tapes, "span_counts": span_counts,
         "statuses": [s.value for s in TapeStatus], "active_status": status,
+        "pager": pager, "qs": f"status={status}&" if status else "",
     })
 
 

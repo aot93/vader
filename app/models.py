@@ -88,10 +88,10 @@ class JobType(str, enum.Enum):
     write = "write"
     verify = "verify"
     restore = "restore"
-    format = "format"
-    clean = "clean"
-    inventory = "inventory"
     backup = "backup"
+    # Note: format / clean / inventory are immediate library actions run from the
+    # Library page (recorded as tape_events), not background jobs — so they are
+    # deliberately absent here.
 
 
 class JobStatus(str, enum.Enum):

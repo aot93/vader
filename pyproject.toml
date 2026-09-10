@@ -16,6 +16,9 @@ filterwarnings = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Alembic-generated migration scripts follow the tool's own template style;
+# user-manual/ holds docs + a throwaway screenshot-capture helper.
+extend-exclude = ["migrations", "user-manual"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "C4"]

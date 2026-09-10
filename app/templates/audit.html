@@ -19,6 +19,7 @@
         </tr>
         {% else %}<tr><td colspan="4" class="muted">Nothing logged yet.</td></tr>{% endfor %}
       </table>
+      {% with pager = entry_pager %}{% include "_pager.html" %}{% endwith %}
     </div>
   </div>
   <div>
@@ -36,6 +37,7 @@
         </tr>
         {% else %}<tr><td colspan="5" class="muted">No events.</td></tr>{% endfor %}
       </table>
+      {% with pager = event_pager, param = 'epage' %}{% include "_pager.html" %}{% endwith %}
     </div>
   </div>
 </div>

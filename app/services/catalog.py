@@ -24,6 +24,8 @@ class SearchFilters:
     project: str | None = None
     source_machine: str | None = None
     backup_category: str | None = None
+    # "exr_sequence" is a pseudo-type meaning "search the sequence_containers
+    # table"; the others map 1:1 to ContentType values on content_items.
     content_type: str | None = None  # exr_sequence | video_chunk | config | audio_media
     tape_barcode: str | None = None
     written_from: datetime | None = None
