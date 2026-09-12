@@ -20,6 +20,12 @@ should you point Vader at the real hardware.
   .venv/bin/pip install -r requirements.lock.txt
   ```
 - The tape toolchain on the VM: `sudo apt install -y mt-st mtx sg3-utils ltfs lsscsi`.
+  **Note:** this installs the distro's open-source `ltfs` package, not IBM's LTFS
+  Single/Library Edition. `mkltfs`'s format step doubles as LTO's media-optimize
+  pass (it always re-optimizes on IBM LTFS 2.4.4.0, which is what LTO-9 requires;
+  2.4.5+ is faster on LTO-9). Check `mkltfs -V` / whatever the distro package
+  reports before relying on batch-format timing for LTO-9 tapes — if it's not a
+  reasonably current IBM build, install IBM's LTFS SDE instead.
 - Do **not** bump dependencies right before a run. If you must, re-run `pytest`
   and re-do the §0 dry run, then re-freeze: `.venv/bin/pip freeze > requirements.lock.txt`.
 
@@ -151,6 +157,7 @@ createdb vader_restore_test && psql vader_restore_test < that_file
 | Dashboard: "Library unreachable" | `HARDWARE_BACKEND`, `CHANGER_DEVICE`; run `sudo mtx -f $CHANGER_DEVICE status` by hand; device node moved? |
 | `mkltfs` / `ltfs` "not found" | tape toolchain not installed in the app's `PATH` |
 | Write job fails "out of scratch tapes" | load more blank tapes, Refresh inventory, re-run the job (idempotent) |
+| Batch format job fails "no free drives available" | a drive is already loaded/mounted from another action — unload it from the Library page, or wait for it to finish, then retry |
 | Job stuck `running` after a crash | restart the app; it becomes `interrupted`; re-run it |
 | "database is locked" (SQLite) | expected only under heavy concurrent use — move to Postgres for the real run |
 | Restore blocked | a required tape is not in the library — the plan lists which barcode and its last known location |

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}New batch format job{% endblock %}
+{% block body %}
+<h1>New batch optimize / format job</h1>
+<div class="panel" style="max-width:640px">
+<form method="post" action="/jobs/new/batch_format">
+  <label>Tape barcodes * (one per line, or comma-separated)</label>
+  <textarea name="barcodes" rows="8" placeholder="TAPE0001L9&#10;TAPE0002L9&#10;TAPE0003L9" required>{{ scratch_barcodes | join('\n') }}</textarea>
+  <p class="tag">Pre-filled with every tape currently catalogued as <code>scratch</code>. Add,
+    remove, or paste your own list — order doesn't matter, tapes are picked up by whichever
+    drive frees first.</p>
+
+  <label class="tag" style="display:block;margin-top:12px">
+    <input type="checkbox" name="force" value="true"> force (repurpose tapes that aren't
+    <code>scratch</code> — <strong>wipes them</strong>)
+  </label>
+
+  <p class="tag">Runs in the background: cycles every listed tape through whichever library
+    drives are free — load → <code>mkltfs</code> (which performs LTFS's built-in media-optimize
+    pass as part of formatting) → unload back to its home slot → next tape. Tapes are refused
+    up front if any aren't <code>scratch</code> and "force" isn't ticked, so the batch doesn't
+    fail partway through. One tape's failure doesn't stop the others; check the job result for
+    per-tape success/failure once it finishes.</p>
+  <p><button class="danger">Queue batch format job</button> <a class="btn ghost" href="/jobs">Cancel</a></p>
+</form>
+</div>
+{% endblock %}

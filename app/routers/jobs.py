@@ -11,7 +11,7 @@ from app.auth import require_auth
 from app.config import get_settings
 from app.db import get_db
 from app.jobs import enqueue
-from app.models import BackupCategory, Job, JobStatus, JobType
+from app.models import BackupCategory, Job, JobStatus, JobType, Tape, TapeStatus
 from app.services import source_manager as sm
 from app.services.catalog import distinct_source_machines
 from app.web import paginate, templates
@@ -98,6 +98,32 @@ def create_verify_job(
         "drive": drive,
     }
     job = enqueue(db, JobType.verify, params)
+    db.commit()
+    return RedirectResponse(f"/jobs/{job.id}", status_code=303)
+
+
+@router.get("/new/batch_format")
+def new_batch_format_job(request: Request, db: Session = Depends(get_db)):
+    scratch = db.scalars(
+        select(Tape.barcode).where(Tape.status == TapeStatus.scratch).order_by(Tape.barcode)
+    ).all()
+    return templates.TemplateResponse(request, "job_batch_format_form.html", {
+        "scratch_barcodes": scratch,
+    })
+
+
+@router.post("/new/batch_format")
+def create_batch_format_job(
+    request: Request,
+    db: Session = Depends(get_db),
+    barcodes: str = Form(...),
+    force: bool = Form(False),
+):
+    parsed = [b.strip() for b in barcodes.replace(",", "\n").splitlines() if b.strip()]
+    if not parsed:
+        raise HTTPException(status_code=400, detail="no tape barcodes given")
+    params = {"barcodes": parsed, "force": force}
+    job = enqueue(db, JobType.batch_format, params)
     db.commit()
     return RedirectResponse(f"/jobs/{job.id}", status_code=303)
 

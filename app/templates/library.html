@@ -59,7 +59,7 @@
 
 <h2>Utilities</h2>
 <p class="muted">Deliberate maintenance actions — these change or wipe physical media.</p>
-<div class="grid cols-3">
+<div class="grid cols-4">
   <div class="panel">
     <strong>Format (mkltfs)</strong>
     <p class="tag">Refuses unless the tape's catalog status is <code>scratch</code>, or you force it.</p>
@@ -69,6 +69,13 @@
       <label><input type="checkbox" name="force" value="true"> force (repurpose a non-scratch tape)</label>
       <p><button class="danger">Format tape</button></p>
     </form>
+  </div>
+  <div class="panel">
+    <strong>Bulk optimize / format</strong>
+    <p class="tag">Cycles a batch of tapes through whichever drives are free: load → format
+      (mkltfs, which optimizes the media as part of formatting) → unload → next tape. Runs as
+      a background job so it can span many tapes and hours without tying up this page.</p>
+    <p><a class="btn danger" href="/jobs/new/batch_format">New batch format job →</a></p>
   </div>
   <div class="panel">
     <strong>Clean drive</strong>

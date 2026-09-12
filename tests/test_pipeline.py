@@ -166,6 +166,55 @@ def test_verify_flags_corruption_and_logs_read_error(seeded, make_source):
     assert db.query(ReadError).count() >= 0  # read-error table exists and is wired
 
 
+def test_batch_format_cycles_tapes_through_free_drives(seeded):
+    from app.hardware import get_hardware
+
+    db = seeded
+    barcodes = sorted(
+        db.scalars(select(Tape.barcode).where(Tape.status == TapeStatus.scratch)).all()
+    )[:3]
+    assert len(barcodes) == 3
+
+    job = _run(db, JobType.batch_format, {"barcodes": barcodes})
+    assert job.status == JobStatus.completed, job.error
+    assert sorted(job.result["succeeded"]) == barcodes
+    assert job.result["failed"] == {}
+
+    db.expire_all()
+    for barcode in barcodes:
+        tape = db.scalar(select(Tape).where(Tape.barcode == barcode))
+        assert tape.status == TapeStatus.scratch
+        assert tape.used_bytes == 0
+        assert tape.write_pass_count == 1
+
+    # every tape must have been returned to a storage slot, not left in a drive
+    state = get_hardware().library_status()
+    assert all(d.loaded_barcode is None for d in state.drives)
+    for barcode in barcodes:
+        assert state.find_barcode_slot(barcode) is not None
+
+
+def test_batch_format_refuses_non_scratch_without_force(seeded, make_source):
+    db = seeded
+    src = make_source()
+    _run(db, JobType.write, {"source_path": str(src), "mode": "standard"})
+
+    tape = db.scalars(
+        select(Tape).where(Tape.status.in_([TapeStatus.active, TapeStatus.full]))
+    ).first()
+    barcode = tape.barcode
+
+    job = _run(db, JobType.batch_format, {"barcodes": [barcode]})
+    assert job.status == JobStatus.failed
+    assert barcode in job.error
+
+    job2 = _run(db, JobType.batch_format, {"barcodes": [barcode], "force": True})
+    assert job2.status == JobStatus.completed, job2.error
+    assert job2.result["succeeded"] == [barcode]
+    db.expire_all()
+    assert db.scalar(select(Tape).where(Tape.barcode == barcode)).status == TapeStatus.scratch
+
+
 def test_backup_job_writes_catalog_csv_and_db_copy(seeded, make_source, settings):
     db = seeded
     src = make_source()
