@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.jobs import enqueue
 from app.jobs.worker import run_pending_jobs_inline
 from app.models import (
+    ConnectionHealth,
     ContentItem,
     ContentTapeSpan,
     Job,
@@ -116,6 +117,40 @@ def test_search_then_prepare_and_run_restore(seeded, make_source, tmp_path):
     # manifests must NOT be in restored output
     assert not list(dest.rglob("_manifests"))
     assert not list(dest.rglob("*.json"))
+
+
+def test_write_job_ingests_from_a_connection_mount_path(seeded, make_source):
+    """Coverage gap noted while explaining sim fidelity: a write job's
+    source_path can be an ingest Connection's real mount_path (as suggested
+    on the write-job form) rather than a hand-typed path. run_write() has no
+    special-casing either way — it only ever sees a plain filesystem path —
+    but nothing previously proved that end-to-end."""
+    from app.services import connection_manager as cm
+
+    db = seeded
+    connection = cm.create_connection(
+        db, hostname="INGEST-01", share="Projects", username="op", password="pw",
+        purpose="ingest",
+    )
+    cm.check_health(db, connection)
+    db.commit()
+    assert connection.last_health == ConnectionHealth.healthy
+
+    src = make_source(root=Path(connection.mount_path) / "Project-Foo")
+    job = _run(db, JobType.write, {"source_path": str(src), "mode": "standard"})
+    assert job.status == JobStatus.completed, job.error
+    assert job.result["readback_mismatches"] == []
+
+    seqs = db.scalars(select(SequenceContainer)).all()
+    assert len(seqs) == 1
+    assert seqs[0].source_path.startswith(connection.mount_path)
+
+    items = db.scalars(select(ContentItem)).all()
+    assert len(items) == 5  # 3 chunks + render.json + notes.txt
+
+    spans = db.scalars(select(ContentTapeSpan)).all()
+    assert spans
+    assert all(s.written_at and s.verified_at for s in spans)
 
 
 def test_restore_to_connection_destination(seeded, make_source):

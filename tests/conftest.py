@@ -92,8 +92,9 @@ def make_source(tmp_path):
     """Build a small archive-shaped source tree and return its path."""
 
     def _make(name: str = "Project-Foo", *, frames: int = 6, frame_size: int = 20_000,
-              chunks: int = 3, chunk_size: int = 30_000, with_config: bool = True):
-        root = tmp_path / name
+              chunks: int = 3, chunk_size: int = 30_000, with_config: bool = True,
+              root: Path | None = None):
+        root = root if root is not None else tmp_path / name
         shot = root / "seq010" / "shot0100"
         shot.mkdir(parents=True)
         for i in range(1, frames + 1):
