@@ -22,6 +22,7 @@ project `RUNBOOK.md` §8 and `docs/LTO-Archive-VM-Setup.md`.
 | Job sits at `queued` forever | Another job is `running`; worker is one-at-a-time | Wait, or cancel the running job ([Jobs](jobs.md)) |
 | *database is locked* (SQLite) | Concurrent writes on SQLite | See §8 |
 | Everything redirects to `/login` | `AUTH_TOKEN` is set | Log in with the shared token, or unset `AUTH_TOKEN` and restart |
+| [Sources](sources.md) entry shows `unhealthy` | The share dropped, or the mount never came up | See §10 |
 
 ---
 
@@ -166,5 +167,25 @@ mode and a 15-second busy timeout, which covers normal single-operator use.
 | A second job stays `queued` while one runs | The worker runs exactly one job at a time. Normal. |
 | A greedy job leaves tapes half empty | That is the point of greedy mode — isolation over efficiency. |
 | A shot shows two tapes with `p1/2` and `p2/2` | It spanned at write time. A restore will load both. |
-| Dashboard "content items" shows an object string, not a number | A known display glitch in one template; the real counts are in [Search](search-catalog.md) and the full-catalog CSV. |
 | `last verified` stays blank after a verify that found problems | The tape's verified date is only set on a fully clean verify. Resolve the problem and verify again. |
+
+---
+
+## 10. Source shows `unhealthy`
+
+The [Sources](sources.md) health check just lists the mount directory; `unhealthy`
+means that listing failed, with the OS error shown as **Last error**.
+
+- **Windows machine is off or asleep** — the automount unit reconnects on its own
+  once it's back; **Recheck now** on the source page to confirm without waiting
+  for the next sweep.
+- **Credentials changed on the Windows side** — remove the source and add it
+  again with the new password; there is no "edit password" action by design (the
+  password is never stored to update).
+- **`SMB_BACKEND=real` and the error mentions `systemctl` or permission denied** —
+  the Vader process cannot write `SMB_SYSTEMD_DIR` or run `systemctl`. It needs
+  root, or a sudoers rule scoped to exactly those commands.
+- **Still unhealthy after the machine is confirmed up** — check
+  `journalctl -u <unit_name>.automount` on the archive VM (the unit name is shown
+  on the source's detail page) for the underlying CIFS mount error (bad share
+  name, SMB version mismatch, firewall).

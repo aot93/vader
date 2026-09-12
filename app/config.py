@@ -78,6 +78,15 @@ class Settings:
         os.environ.get("MANUAL_DIR", str(Path(__file__).resolve().parent.parent / "user-manual"))
     ).resolve()
 
+    # SMB Source Manager (Vader SMB Source Manager design spec v1.0). "simulator"
+    # provisions the same file layout under DATA_DIR/sim/ with no systemctl calls
+    # or root required; "real" writes systemd units under smb_systemd_dir and
+    # drives them with systemctl, same split as HARDWARE_BACKEND above.
+    smb_backend: str = os.environ.get("SMB_BACKEND", "simulator")
+    smb_mount_base: str = os.environ.get("SMB_MOUNT_BASE", "/mnt/vader")
+    smb_systemd_dir: str = os.environ.get("SMB_SYSTEMD_DIR", "/etc/systemd/system")
+    smb_health_interval_seconds: int = _int("SMB_HEALTH_INTERVAL_SECONDS", 300)
+
     reverify_months: int = _int("REVERIFY_MONTHS", 12)
     default_verify_sample_fraction: float = _float("DEFAULT_VERIFY_SAMPLE_FRACTION", 0.1)
     write_readback_verify: bool = _bool("WRITE_READBACK_VERIFY", True)
@@ -99,6 +108,11 @@ class Settings:
         (self.data_dir / "manifests").mkdir(parents=True, exist_ok=True)
         (self.data_dir / "exports").mkdir(parents=True, exist_ok=True)
         (self.data_dir / "sim").mkdir(parents=True, exist_ok=True)
+        creds_dir = self.data_dir / "smb_credentials"
+        creds_dir.mkdir(parents=True, exist_ok=True)
+        creds_dir.chmod(0o700)
+        (self.data_dir / "sim" / "mounts").mkdir(parents=True, exist_ok=True)
+        (self.data_dir / "sim" / "systemd").mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache(maxsize=1)

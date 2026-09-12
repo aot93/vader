@@ -32,6 +32,7 @@ which runs on the Linux VM described in [`docs/LTO-Archive-VM-Setup.md`](docs/LT
 | Audit log of every load/unload/write/verify/restore | §3.7 | ✅ |
 | Background jobs with persisted progress; interrupted jobs detected on restart; idempotent re-run | §2, §6 | ✅ |
 | Database backup + full-catalog CSV export for catalog durability | §8 | ✅ |
+| Source Manager — add a Windows SMB share via the UI; Vader creates the credentials file, mount point and a systemd automount unit, checks its health, and offers it on the write-job form | [SMB Source Manager design spec](docs/Vader-SMB-Source-Manager-Design-Spec.md) | ✅ |
 
 ## Stack
 
@@ -42,6 +43,9 @@ which runs on the Linux VM described in [`docs/LTO-Archive-VM-Setup.md`](docs/LT
 - **Hardware:** an abstraction layer with two backends —
   - `real` — subprocess wrappers around `mtx` / `mt` / `mkltfs` / `ltfs`, run on the archive VM.
   - `simulator` — in-memory library + directory-backed fake LTFS, so the whole app runs, demos and tests with **no tape hardware**.
+- **SMB mounts:** the same split for the [Source Manager](user-manual/sources.md) —
+  - `real` — writes systemd `.mount`/`.automount` units and drives them with `systemctl`.
+  - `simulator` — the same file layout under `DATA_DIR/sim/`, no root or Windows box needed.
 
 ## Quick start (simulator, SQLite)
 
@@ -104,6 +108,7 @@ app/
   config.py            settings from env / .env
   db.py  models.py      SQLAlchemy engine + the permanent-record schema
   hardware/             base + real (mtx/ltfs) + simulator backends
+  mounts/               base + real (systemd/cifs) + simulator SMB mount backends
   services/
     intake.py           classify a source tree into A/B/C/D write units
     spanning.py         tape allocation, cross-tape spanning, greedy mode
@@ -113,6 +118,8 @@ app/
     export_csv.py        per-tape and full-catalog CSV
     library.py           mtx/ltfs actions, each logged as a tape event
     manual.py            render user-manual/*.md live for the in-app Help page
+    source_manager.py    Source Manager: create/health-check/delete SMB sources
+    source_health_monitor.py  periodic background health sweep for sources
   jobs/                 persisted background worker
   routers/  templates/  static/    the web UI
 migrations/             Alembic

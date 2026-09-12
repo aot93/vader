@@ -5,7 +5,15 @@
 <div class="panel" style="max-width:640px">
 <form method="post" action="/jobs/new/write">
   <label>Source path (directory on this host / a mounted share) *</label>
-  <input type="text" name="source_path" placeholder="/mnt/sources/Project-Foo" required>
+  <input type="text" name="source_path" list="known-sources"
+         placeholder="/mnt/sources/Project-Foo" required>
+  {% if sources %}
+  <datalist id="known-sources">
+    {% for s in sources %}<option value="{{ s.mount_path }}">{{ s.hostname }} / {{ s.share }}</option>{% endfor %}
+  </datalist>
+  <p class="tag">Pick a mounted <a href="/sources">source</a> from the suggestions, or
+    type a path directly.</p>
+  {% endif %}
 
   <label>Mode</label>
   <select name="mode">

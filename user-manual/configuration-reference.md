@@ -13,7 +13,8 @@ changing any value means restarting the application.
    `VADER_ENV_FILE`). Values already set in the real environment win over `.env`.
 2. Settings are then frozen for the life of the process.
 3. On startup Vader also creates, if missing: `DATA_DIR`, `BACKUP_DIR`,
-   `DATA_DIR/manifests`, `DATA_DIR/exports`, `DATA_DIR/sim`.
+   `DATA_DIR/manifests`, `DATA_DIR/exports`, `DATA_DIR/sim`,
+   `DATA_DIR/smb_credentials` (mode 700).
 
 Boolean values accept `1`, `true`, `yes`, `on` (case-insensitive) for true;
 anything else is false.
@@ -53,11 +54,22 @@ anything else is false.
 
 ---
 
+## SMB Source Manager (only used when `SMB_BACKEND=real`)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SMB_BACKEND` | `simulator` | `simulator` = same credentials file / mount dir / unit layout under `DATA_DIR/sim/`, no `systemctl` calls, no root needed. `real` = write systemd units under `SMB_SYSTEMD_DIR` and drive them with `systemctl` on this host. |
+| `SMB_MOUNT_BASE` | `/mnt/vader` | Sources are mounted at `<base>/<hostname>`. **`real` only** — the simulator mounts under `DATA_DIR/sim/mounts/<hostname>` instead. |
+| `SMB_SYSTEMD_DIR` | `/etc/systemd/system` | Where the generated `.mount` / `.automount` unit pair is written. Requires the process to be able to write here and run `systemctl` — root, or a sudoers rule scoped to this app. **`real` only.** |
+| `SMB_HEALTH_INTERVAL_SECONDS` | `300` | How often the background health-check sweep re-checks every configured source (floor of 30s). See [Sources](sources.md). |
+
+---
+
 ## Paths
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DATA_DIR` | `./data` (resolved to absolute) | Working directory. Holds `manifests/`, `exports/`, `sim/`, and default `restores/` output. |
+| `DATA_DIR` | `./data` (resolved to absolute) | Working directory. Holds `manifests/`, `exports/`, `sim/`, `smb_credentials/`, and default `restores/` output. |
 | `BACKUP_DIR` | `./data/backups` (resolved) | Where the backup job and `scripts/backup.sh` write the DB dump and full-catalog CSV. **Point at the network share for a real run.** |
 | `MANUAL_DIR` | `<repo>/user-manual` (resolved) | Directory of Markdown files rendered live at **Help** (`/help`). Change only if you deploy the manual separately from the app. |
 

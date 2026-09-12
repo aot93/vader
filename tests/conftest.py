@@ -39,7 +39,7 @@ def _fresh_state():
     if hasattr(hw, "reset"):
         hw.reset()
     settings = get_settings()
-    for sub in ("manifests", "exports", "restores"):
+    for sub in ("manifests", "exports", "restores", "smb_credentials", "sim/mounts", "sim/systemd"):
         p = settings.data_dir / sub
         if p.exists():
             shutil.rmtree(p)

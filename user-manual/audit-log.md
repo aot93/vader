@@ -43,6 +43,9 @@ application action (`verify.completed`, with the result summary in `detail`) and
 | Verify job completes | `verify.completed` (with result) | `load` / `verify` / `unload` |
 | Prepare restore | `restore.prepared` (tapes + warnings) | — |
 | Restore job completes | `restore.completed` (destination, counts, problems) | `load` / `unload` per tape |
+| Sources → Add source | `source.add` (hostname, share, mount path, backend) | — |
+| Sources → Remove source | `source.delete` (hostname, share) | — |
+| Source health sweep changes state | `source.health` (hostname, healthy, error) — only logged on a *transition*, not every sweep | — |
 
 Hardware actions that fail still get a `tape_events` row, with result `error` and
 the error text in `error_detail` — visible per tape on the

@@ -62,6 +62,9 @@ code, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; 
 .pill.completed, .pill.success { color: var(--ok); border-color: var(--ok); }
 .pill.running, .pill.queued { color: var(--accent); border-color: var(--accent); }
 .pill.interrupted, .pill.partial, .pill.cancelled, .pill.pending { color: var(--warn); border-color: var(--warn); }
+.pill.healthy { color: var(--ok); border-color: var(--ok); }
+.pill.unhealthy { color: var(--err); border-color: var(--err); }
+.pill.unknown { color: var(--muted); }
 .flash { padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; }
 .flash.ok { background: rgba(75,210,143,.12); border: 1px solid var(--ok); }
 .flash.err { background: rgba(255,107,107,.12); border: 1px solid var(--err); }

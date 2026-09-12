@@ -36,6 +36,7 @@ which is covered in the project `RUNBOOK.md` and only summarised here.
 |---|---|
 | [Getting started](getting-started.md) | Install, environment variables, first run, login. Brief — links to `RUNBOOK.md` for the VM build. |
 | [Dashboard](dashboard.md) | The landing screen: tape counts, catalog totals, library map, jobs in flight, re-verification reminders. |
+| [Sources](sources.md) | Add a Windows SMB share as an auto-mounted, auto-reconnecting ingest root — no manual `mount.cifs` — and pick it on the write-job form. |
 | [Library & drive control](library.md) | Refresh inventory, load / unload, and the Utilities: Format (scratch), Clean drive, Retire tape. |
 | [Tapes](tapes.md) | The tape list and tape detail page: statuses, capacity, location, offsite pairing, "dedicated to" (greedy), notes, per-tape contents, event and read-error history. |
 | [Archiving](archiving.md) | **Primary chapter.** Preparing a source tree, content classification (Types A–D), starting a write job, standard vs greedy mode, tape spanning, write-time checksums and read-back verify, idempotent re-runs, monitoring, on-tape catalog and manifests. |
@@ -66,7 +67,10 @@ with the detail.
    tapes automatically, but only if they are in the library and marked `scratch`.
    Format any that still report a non-scratch status via
    **[Library](library.md) → Utilities → Format**.
-4. **[Jobs](jobs.md) → + Write job** for the general project archive: source path,
+4. **If a source machine isn't already mounted,** add it once under
+   [Sources](sources.md) instead of mounting it by hand — it reconnects on its
+   own after that.
+5. **[Jobs](jobs.md) → + Write job** for the general project archive: source path,
    **standard** mode, backup category `project_archive`. See [Archiving](archiving.md).
 5. **[Jobs](jobs.md) → + Write job** for each machine-drive pull: **greedy** mode,
    greedy source = the machine name, backup category `machine_drive_backup`.

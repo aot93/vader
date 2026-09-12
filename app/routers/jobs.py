@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.db import get_db
 from app.jobs import enqueue
 from app.models import BackupCategory, Job, JobStatus, JobType
+from app.services import source_manager as sm
 from app.services.catalog import distinct_source_machines
 from app.web import paginate, templates
 
@@ -34,6 +35,7 @@ def new_write_job(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(request, "job_write_form.html", {
         "machines": distinct_source_machines(db),
         "categories": [c.value for c in BackupCategory],
+        "sources": sm.list_healthy_sources(db),
     })
 
 
