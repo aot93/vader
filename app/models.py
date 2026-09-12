@@ -329,7 +329,9 @@ class RestoreRequest(Base):
     # Set only when the destination was picked from a restore_destination
     # Connection rather than typed by hand — destination_path above is always
     # the fully-resolved path either way; this is purely for display/audit.
-    destination_connection_id: Mapped[int | None] = mapped_column(ForeignKey("connections.id"))
+    destination_connection_id: Mapped[int | None] = mapped_column(
+        ForeignKey("connections.id", ondelete="SET NULL")
+    )
     include_manifests: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[RestoreStatus] = mapped_column(
         Enum(RestoreStatus, native_enum=False, length=16), default=RestoreStatus.pending, index=True

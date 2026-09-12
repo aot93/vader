@@ -14,6 +14,7 @@ from app.models import (
     Job,
     JobStatus,
     JobType,
+    RestoreRequest,
     SequenceContainer,
     Tape,
     TapeStatus,
@@ -151,6 +152,42 @@ def test_restore_to_connection_destination(seeded, make_source):
 
     restored_frames = list((Path(connection.mount_path) / "job-42").rglob("*.exr"))
     assert len(restored_frames) == 6
+
+
+def test_deleting_a_connection_referenced_by_a_past_restore_does_not_crash(seeded, make_source):
+    """Regression: destination_connection_id used to be a plain FK with no
+    ON DELETE behaviour, so removing a connection that any past restore
+    request happened to reference raised a raw IntegrityError (500) instead
+    of succeeding. The FK is purely for display; deleting the connection
+    should just null it out on old requests, not block the delete."""
+    from app.services import connection_manager as cm
+
+    db = seeded
+    src = make_source()
+    _run(db, JobType.write, {"source_path": str(src), "mode": "standard"})
+
+    connection = cm.create_connection(
+        db, hostname="EDIT-03", share="Restores", username="op", password="pw",
+        purpose="restore_destination",
+    )
+    db.commit()
+
+    hits = search_content(db, SearchFilters(q="shot0100"))
+    seq_hit = next(h for h in hits if h.kind == "sequence")
+    req = prepare_restore(
+        db, sequence_container_ids=[seq_hit.id],
+        destination_connection_id=connection.id, requested_by="tester",
+    )
+    db.expire_all()
+    assert req.destination_connection_id == connection.id
+
+    cm.delete_connection(db, connection.id)
+    db.commit()
+
+    db.expire_all()
+    req = db.get(RestoreRequest, req.id)
+    assert req.destination_connection_id is None
+    assert req.destination_path  # resolved path itself is untouched
 
 
 def test_prepare_restore_rejects_traversal_in_destination_subpath(seeded, make_source):
