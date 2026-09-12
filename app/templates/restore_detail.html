@@ -3,7 +3,8 @@
 {% block body %}
 <h1>Restore request {{ req.id }} <span class="pill {{ req.status.value }}">{{ req.status.value }}</span></h1>
 <p class="tag">Requested {{ req.requested_at | dt }} by {{ req.requested_by }} ·
-   destination <span class="mono">{{ req.destination_path }}</span> ·
+   destination <span class="mono">{{ req.destination_path }}</span>
+   {% if destination_connection %}<span class="tag">(<a href="/connections/{{ destination_connection.id }}">{{ destination_connection.hostname }} / {{ destination_connection.share }}</a>)</span>{% endif %} ·
    manifests {{ 'INCLUDED (review copy)' if req.include_manifests else 'excluded' }}</p>
 
 {% if req.warnings %}

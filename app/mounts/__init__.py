@@ -1,3 +1,3 @@
-from app.mounts.base import MountBackend, MountError, SourceSpec, get_mount_backend
+from app.mounts.base import ConnectionSpec, MountBackend, MountError, get_mount_backend
 
-__all__ = ["MountBackend", "MountError", "SourceSpec", "get_mount_backend"]
+__all__ = ["ConnectionSpec", "MountBackend", "MountError", "get_mount_backend"]

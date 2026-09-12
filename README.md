@@ -32,7 +32,8 @@ which runs on the Linux VM described in [`docs/LTO-Archive-VM-Setup.md`](docs/LT
 | Audit log of every load/unload/write/verify/restore | §3.7 | ✅ |
 | Background jobs with persisted progress; interrupted jobs detected on restart; idempotent re-run | §2, §6 | ✅ |
 | Database backup + full-catalog CSV export for catalog durability | §8 | ✅ |
-| Source Manager — add a Windows SMB share via the UI; Vader creates the credentials file, mount point and a systemd automount unit, checks its health, and offers it on the write-job form | [SMB Source Manager design spec](docs/Vader-SMB-Source-Manager-Design-Spec.md) | ✅ |
+| Connection Manager — add a Windows SMB share via the UI as a read-only ingest source or a read-write restore destination; Vader creates the credentials file, mount point and a systemd automount unit, checks its health, and offers it on the write-job / restore-prep form | [SMB Source Manager design spec](docs/Vader-SMB-Source-Manager-Design-Spec.md) | ✅ |
+| Restore to a pre-configured destination connection (not just a local path) | — | ✅ |
 
 ## Stack
 
@@ -43,7 +44,7 @@ which runs on the Linux VM described in [`docs/LTO-Archive-VM-Setup.md`](docs/LT
 - **Hardware:** an abstraction layer with two backends —
   - `real` — subprocess wrappers around `mtx` / `mt` / `mkltfs` / `ltfs`, run on the archive VM.
   - `simulator` — in-memory library + directory-backed fake LTFS, so the whole app runs, demos and tests with **no tape hardware**.
-- **SMB mounts:** the same split for the [Source Manager](user-manual/sources.md) —
+- **SMB mounts:** the same split for the [Connection Manager](user-manual/connections.md) —
   - `real` — writes systemd `.mount`/`.automount` units and drives them with `systemctl`.
   - `simulator` — the same file layout under `DATA_DIR/sim/`, no root or Windows box needed.
 
@@ -118,8 +119,8 @@ app/
     export_csv.py        per-tape and full-catalog CSV
     library.py           mtx/ltfs actions, each logged as a tape event
     manual.py            render user-manual/*.md live for the in-app Help page
-    source_manager.py    Source Manager: create/health-check/delete SMB sources
-    source_health_monitor.py  periodic background health sweep for sources
+    connection_manager.py       Connection Manager: create/health-check/delete SMB connections
+    connection_health_monitor.py  periodic background health sweep for connections
   jobs/                 persisted background worker
   routers/  templates/  static/    the web UI
 migrations/             Alembic

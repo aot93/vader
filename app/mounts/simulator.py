@@ -1,14 +1,14 @@
 """Simulated mount backend — no root, no systemd, no real Windows box required.
 
-Lets the Source Manager be added, health-checked, and removed on a plain dev
+Lets connections be added, health-checked, and removed on a plain dev
 machine, exercising the same credentials-file security property (mode 600) as
 the real backend. Health can be flipped to "down" for testing by dropping a
 ``.simulate-down`` file into the simulated mount directory.
 
-Mounts land under ``DATA_DIR/sim/mounts/<hostname>`` rather than
-``smb_mount_base`` — :meth:`mount_root` is how ``source_manager`` finds out
-that, so ``Source.mount_path`` always points at wherever this backend actually
-put things.
+Mounts land under ``DATA_DIR/sim/mounts/<mount_dir_name>`` rather than
+``smb_mount_base`` — :meth:`mount_root` is how ``connection_manager`` finds
+out that, so ``Connection.mount_path`` always points at wherever this backend
+actually put things.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ import shutil
 from pathlib import Path
 
 from app.config import get_settings
-from app.mounts.base import MountBackend, SourceSpec
+from app.mounts.base import ConnectionSpec, MountBackend
 
 
 class SimulatedMountBackend(MountBackend):
@@ -26,10 +26,10 @@ class SimulatedMountBackend(MountBackend):
     def mount_root(self) -> Path:
         return get_settings().data_dir / "sim" / "mounts"
 
-    def _unit_marker(self, spec: SourceSpec) -> Path:
+    def _unit_marker(self, spec: ConnectionSpec) -> Path:
         return get_settings().data_dir / "sim" / "systemd" / f"{spec.unit_name}.marker"
 
-    def provision(self, spec: SourceSpec, password: str) -> None:
+    def provision(self, spec: ConnectionSpec, password: str) -> None:
         # Credentials file: real file, real chmod 600 — worth exercising even
         # in simulation since the security property matters most here.
         cred_path = Path(spec.credentials_path)
@@ -47,17 +47,18 @@ class SimulatedMountBackend(MountBackend):
 
         marker = self._unit_marker(spec)
         marker.parent.mkdir(parents=True, exist_ok=True)
+        mode = "ro" if spec.read_only else "rw"
         marker.write_text(
             f"[Mount]\nWhat=//{spec.hostname}/{spec.share}\nWhere={spec.mount_path}\n"
-            f"Options=credentials={spec.credentials_path},vers={spec.smb_version},ro\n"
+            f"Options=credentials={spec.credentials_path},vers={spec.smb_version},{mode}\n"
         )
 
-    def deprovision(self, spec: SourceSpec) -> None:
+    def deprovision(self, spec: ConnectionSpec) -> None:
         Path(spec.credentials_path).unlink(missing_ok=True)
         shutil.rmtree(Path(spec.mount_path), ignore_errors=True)
         self._unit_marker(spec).unlink(missing_ok=True)
 
-    def check_health(self, spec: SourceSpec) -> tuple[bool, str | None]:
+    def check_health(self, spec: ConnectionSpec) -> tuple[bool, str | None]:
         mount_dir = Path(spec.mount_path)
         try:
             entries = os.listdir(mount_dir)

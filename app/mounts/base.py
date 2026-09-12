@@ -1,5 +1,5 @@
-"""Mount-provisioning abstraction for SMB ingest sources (Vader SMB Source
-Manager design spec v1.0).
+"""Mount-provisioning abstraction for SMB connections — ingest sources
+(Vader SMB Source Manager design spec v1.0) and, later, restore destinations.
 
 Two implementations, mirroring the ``app/hardware`` split:
 
@@ -10,7 +10,7 @@ Two implementations, mirroring the ``app/hardware`` split:
   run ``systemctl`` (root, or a scoped sudoers rule).
 * :class:`~app.mounts.simulator.SimulatedMountBackend` — the same file layout
   under ``DATA_DIR/sim/`` instead of ``/etc`` + ``/mnt``, no ``systemctl``
-  calls, so the Source Manager can be demoed, tested, and developed on a
+  calls, so the Connection Manager can be demoed, tested, and developed on a
   machine with no root and no real Windows boxes — same rationale as
   ``app.hardware``'s simulator.
 
@@ -36,7 +36,7 @@ _SIMPLE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._$-]{0,127}$")
 
 
 class MountError(RuntimeError):
-    """Any failure provisioning, removing, or checking a source mount."""
+    """Any failure provisioning, removing, or checking a connection's mount."""
 
 
 def sanitize_hostname(value: str) -> str:
@@ -62,16 +62,28 @@ def sanitize_simple(value: str, field: str) -> str:
     return value
 
 
-def unit_name_for(hostname: str) -> str:
-    return "mnt-vader-" + re.sub(r"[^A-Za-z0-9]+", "-", hostname).strip("-").lower()
+def unit_name_for(hostname: str, purpose: str = "ingest") -> str:
+    base = "mnt-vader-" + re.sub(r"[^A-Za-z0-9]+", "-", hostname).strip("-").lower()
+    # Ingest keeps its original, suffix-less name — real hosts may already
+    # have a systemd unit under this exact name from before restore
+    # destinations existed, and renaming it out from under an existing mount
+    # would orphan it. Restore destinations are always a distinct connection.
+    return base if purpose == "ingest" else f"{base}-restore"
+
+
+def mount_dir_name(hostname: str, purpose: str = "ingest") -> str:
+    """Same rationale as :func:`unit_name_for`: ingest's directory name is
+    unchanged so an existing real mount isn't relocated; a restore
+    destination for the same hostname gets its own directory."""
+    return hostname if purpose == "ingest" else f"{hostname}-restore"
 
 
 @dataclass(frozen=True)
-class SourceSpec:
-    """Everything a backend needs to provision/check one source. Carries the
-    password only in memory, in transit from the create form to
+class ConnectionSpec:
+    """Everything a backend needs to provision/check one connection. Carries
+    the password only in memory, in transit from the create form to
     :meth:`MountBackend.provision` — it is never persisted on the
-    :class:`~app.models.Source` row."""
+    :class:`~app.models.Connection` row."""
 
     hostname: str
     share: str
@@ -81,6 +93,7 @@ class SourceSpec:
     smb_version: str
     domain: str | None
     username: str
+    read_only: bool = True
 
 
 class MountBackend(abc.ABC):
@@ -88,27 +101,27 @@ class MountBackend(abc.ABC):
 
     @abc.abstractmethod
     def mount_root(self):
-        """Base directory this backend actually mounts sources under —
-        ``<root>/<hostname>`` is the real, listable path for a given source.
-        The simulator's root is *not* ``smb_mount_base``; callers must ask the
-        backend rather than assume a fixed setting, or the path stored on the
-        :class:`~app.models.Source` row can point somewhere the backend never
-        touches."""
+        """Base directory this backend actually mounts connections under —
+        ``<root>/<mount_dir_name(hostname, purpose)>`` is the real, listable
+        path for a given connection. The simulator's root is *not*
+        ``smb_mount_base``; callers must ask the backend rather than assume a
+        fixed setting, or the path stored on the :class:`~app.models.Connection`
+        row can point somewhere the backend never touches."""
 
     @abc.abstractmethod
-    def provision(self, spec: SourceSpec, password: str) -> None:
+    def provision(self, spec: ConnectionSpec, password: str) -> None:
         """Create the credentials file, mount dir and automount unit, then
         enable + start it. Must be safe to call twice (re-running creation
         should not break — design spec "Implementation Notes")."""
 
     @abc.abstractmethod
-    def deprovision(self, spec: SourceSpec) -> None:
+    def deprovision(self, spec: ConnectionSpec) -> None:
         """Undo everything ``provision`` did. Must not raise if some of it was
-        already missing, so a partially-provisioned source can still be
+        already missing, so a partially-provisioned connection can still be
         cleanly removed."""
 
     @abc.abstractmethod
-    def check_health(self, spec: SourceSpec) -> tuple[bool, str | None]:
+    def check_health(self, spec: ConnectionSpec) -> tuple[bool, str | None]:
         """Return ``(healthy, error_detail)``."""
 
 

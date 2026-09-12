@@ -1,7 +1,7 @@
-"""Background thread that sweeps every configured source every
+"""Background thread that sweeps every configured connection every
 ``SMB_HEALTH_INTERVAL_SECONDS`` (default 300s / 5 minutes) and records
-last_health / last_error, so a share going offline shows up on the Sources
-page without the operator having to click "Recheck now" themselves.
+last_health / last_error, so a share going offline shows up on the
+Connections page without the operator having to click "Recheck now" themselves.
 
 Deliberately its own thread rather than a ``Job`` — it is a recurring sweep,
 not a one-shot operator-triggered task, so it does not belong in the jobs
@@ -13,14 +13,14 @@ import threading
 
 from app.config import get_settings
 from app.db import session_scope
-from app.services.source_manager import check_all_sources
+from app.services.connection_manager import check_all_connections
 
 
-class SourceHealthMonitor(threading.Thread):
+class ConnectionHealthMonitor(threading.Thread):
     daemon = True
 
     def __init__(self) -> None:
-        super().__init__(name="vader-source-health")
+        super().__init__(name="vader-connection-health")
         self._stop = threading.Event()
 
     def stop(self) -> None:
@@ -31,24 +31,24 @@ class SourceHealthMonitor(threading.Thread):
         while not self._stop.is_set():
             try:
                 with session_scope() as db:
-                    check_all_sources(db)
+                    check_all_connections(db)
             except Exception:  # noqa: BLE001 - a bad sweep must not kill the thread
                 pass
             self._stop.wait(interval)
 
 
-_monitor: SourceHealthMonitor | None = None
+_monitor: ConnectionHealthMonitor | None = None
 
 
-def start_source_health_monitor() -> SourceHealthMonitor:
+def start_connection_health_monitor() -> ConnectionHealthMonitor:
     global _monitor
     if _monitor is None or not _monitor.is_alive():
-        _monitor = SourceHealthMonitor()
+        _monitor = ConnectionHealthMonitor()
         _monitor.start()
     return _monitor
 
 
-def stop_source_health_monitor() -> None:
+def stop_connection_health_monitor() -> None:
     global _monitor
     if _monitor is not None:
         _monitor.stop()

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from sqlalchemy import select
 
 from app.jobs import enqueue
@@ -114,6 +115,64 @@ def test_search_then_prepare_and_run_restore(seeded, make_source, tmp_path):
     # manifests must NOT be in restored output
     assert not list(dest.rglob("_manifests"))
     assert not list(dest.rglob("*.json"))
+
+
+def test_restore_to_connection_destination(seeded, make_source):
+    """Restoring against a pre-configured restore-destination Connection
+    (rather than a hand-typed path) must land files under that connection's
+    mount, in an optional operator-chosen subpath."""
+    from app.services import connection_manager as cm
+
+    db = seeded
+    src = make_source()
+    _run(db, JobType.write, {"source_path": str(src), "mode": "standard"})
+
+    connection = cm.create_connection(
+        db, hostname="EDIT-01", share="Restores", username="op", password="pw",
+        purpose="restore_destination",
+    )
+    cm.check_health(db, connection)
+    db.commit()
+
+    hits = search_content(db, SearchFilters(q="shot0100"))
+    seq_hit = next(h for h in hits if h.kind == "sequence")
+
+    req = prepare_restore(
+        db, sequence_container_ids=[seq_hit.id],
+        destination_connection_id=connection.id, destination_subpath="job-42",
+        requested_by="tester",
+    )
+    db.expire_all()
+    assert req.destination_connection_id == connection.id
+    assert req.destination_path == str(Path(connection.mount_path) / "job-42")
+
+    job = _run(db, JobType.restore, {"restore_id": req.id})
+    assert job.status == JobStatus.completed, job.error
+
+    restored_frames = list((Path(connection.mount_path) / "job-42").rglob("*.exr"))
+    assert len(restored_frames) == 6
+
+
+def test_prepare_restore_rejects_traversal_in_destination_subpath(seeded, make_source):
+    from app.services import connection_manager as cm
+
+    db = seeded
+    src = make_source()
+    _run(db, JobType.write, {"source_path": str(src), "mode": "standard"})
+    connection = cm.create_connection(
+        db, hostname="EDIT-02", share="Restores", username="op", password="pw",
+        purpose="restore_destination",
+    )
+    db.commit()
+
+    hits = search_content(db, SearchFilters(q="shot0100"))
+    seq_hit = next(h for h in hits if h.kind == "sequence")
+
+    with pytest.raises(ValueError, match=r"\.\."):
+        prepare_restore(
+            db, sequence_container_ids=[seq_hit.id],
+            destination_connection_id=connection.id, destination_subpath="../../etc",
+        )
 
 
 def test_greedy_write_isolates_source_to_own_tapes(seeded, tmp_path):

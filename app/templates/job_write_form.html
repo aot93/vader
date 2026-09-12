@@ -7,11 +7,11 @@
   <label>Source path (directory on this host / a mounted share) *</label>
   <input type="text" name="source_path" list="known-sources"
          placeholder="/mnt/sources/Project-Foo" required>
-  {% if sources %}
+  {% if ingest_connections %}
   <datalist id="known-sources">
-    {% for s in sources %}<option value="{{ s.mount_path }}">{{ s.hostname }} / {{ s.share }}</option>{% endfor %}
+    {% for c in ingest_connections %}<option value="{{ c.mount_path }}">{{ c.hostname }} / {{ c.share }}</option>{% endfor %}
   </datalist>
-  <p class="tag">Pick a mounted <a href="/sources">source</a> from the suggestions, or
+  <p class="tag">Pick a mounted <a href="/connections">connection</a> from the suggestions, or
     type a path directly.</p>
   {% endif %}
 

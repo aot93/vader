@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Connections{% endblock %}
+{% block body %}
+<h1>Connections</h1>
+
+<h2>Ingest sources <span class="tag">read-only</span></h2>
+<p>
+  <a class="btn ghost" href="/connections/new?purpose=ingest">+ Add ingest source</a>
+  <span class="tag" style="margin-left:12px">Windows shares Vader mounts and keeps mounted for you —
+    pick one as a write job's source path instead of setting up a mount by hand.</span>
+</p>
+<div class="panel">
+<table>
+  <tr><th>Hostname</th><th>Share</th><th>Mount path</th><th>Health</th><th>Last checked</th><th>Username</th></tr>
+  {% for c in ingest %}
+  <tr>
+    <td><a href="/connections/{{ c.id }}"><code>{{ c.hostname }}</code></a></td>
+    <td>{{ c.share }}</td>
+    <td class="mono">{{ c.mount_path }}</td>
+    <td>
+      <span class="pill {{ c.last_health.value }}">{{ c.last_health.value }}</span>
+      {% if c.last_error %}<div class="tag">{{ c.last_error }}</div>{% endif %}
+    </td>
+    <td class="tag">{{ c.last_checked_at | dt }}</td>
+    <td>{{ c.username }}{% if c.domain %} ({{ c.domain }}){% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6" class="muted">No ingest sources configured yet. Add one to skip
+    setting up mounts by hand.</td></tr>
+  {% endfor %}
+</table>
+</div>
+
+<h2>Restore destinations <span class="tag">read-write</span></h2>
+<p>
+  <a class="btn ghost" href="/connections/new?purpose=restore_destination">+ Add restore destination</a>
+  <span class="tag" style="margin-left:12px">Windows shares Vader restores files onto —
+    pick one when preparing a restore instead of typing a path by hand. Always a
+    separate, read-write mount, even for a hostname that already has an ingest
+    source above.</span>
+</p>
+<div class="panel">
+<table>
+  <tr><th>Hostname</th><th>Share</th><th>Mount path</th><th>Health</th><th>Last checked</th><th>Username</th></tr>
+  {% for c in restore_destinations %}
+  <tr>
+    <td><a href="/connections/{{ c.id }}"><code>{{ c.hostname }}</code></a></td>
+    <td>{{ c.share }}</td>
+    <td class="mono">{{ c.mount_path }}</td>
+    <td>
+      <span class="pill {{ c.last_health.value }}">{{ c.last_health.value }}</span>
+      {% if c.last_error %}<div class="tag">{{ c.last_error }}</div>{% endif %}
+    </td>
+    <td class="tag">{{ c.last_checked_at | dt }}</td>
+    <td>{{ c.username }}{% if c.domain %} ({{ c.domain }}){% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6" class="muted">No restore destinations configured yet. Restores
+    fall back to a local path on this VM until you add one.</td></tr>
+  {% endfor %}
+</table>
+</div>
+{% endblock %}

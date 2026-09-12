@@ -21,6 +21,9 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.hardware import HardwareError, get_hardware
 from app.models import (
+    Connection,
+    ConnectionHealth,
+    ConnectionPurpose,
     ContentItem,
     ContentTapeSpan,
     RestoreRequest,
@@ -43,6 +46,42 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _sanitize_subpath(subpath: str | None) -> str:
+    """A restore-destination subpath is a relative path *under* a connection's
+    mount root, entered by the operator — never allow it to escape that root."""
+    if not subpath or not subpath.strip():
+        return ""
+    parts = Path(subpath.strip().strip("/")).parts
+    if any(p in ("..", ".") for p in parts):
+        raise ValueError("destination subpath must not contain '..' or '.'")
+    return str(Path(*parts)) if parts else ""
+
+
+def _resolve_destination(
+    db: Session,
+    *,
+    destination_path: str | None,
+    destination_connection_id: int | None,
+    destination_subpath: str | None,
+) -> tuple[str, Connection | None, list[str]]:
+    """Returns (destination_path, connection_or_None, warnings)."""
+    if not destination_connection_id:
+        return destination_path or str(get_settings().data_dir / "restores"), None, []
+
+    connection = db.get(Connection, destination_connection_id)
+    if not connection or connection.purpose != ConnectionPurpose.restore_destination:
+        raise ValueError(f"unknown restore-destination connection: {destination_connection_id}")
+    subpath = _sanitize_subpath(destination_subpath)
+    dest = str(Path(connection.mount_path) / subpath) if subpath else connection.mount_path
+    warnings = []
+    if connection.last_health != ConnectionHealth.healthy:
+        warnings.append(
+            f"restore destination {connection.hostname} is not currently healthy "
+            f"({connection.last_health.value}) — check Connections before running"
+        )
+    return dest, connection, warnings
+
+
 def _collect_spans(db: Session, seq_ids: list[int], item_ids: list[int]) -> list[ContentTapeSpan]:
     spans: list[ContentTapeSpan] = []
     if seq_ids:
@@ -62,6 +101,8 @@ def prepare_restore(
     sequence_container_ids: list[int] | None = None,
     content_item_ids: list[int] | None = None,
     destination_path: str | None = None,
+    destination_connection_id: int | None = None,
+    destination_subpath: str | None = None,
     include_manifests: bool = False,
     requested_by: str = "operator",
 ) -> RestoreRequest:
@@ -74,12 +115,18 @@ def prepare_restore(
     if not spans:
         raise ValueError("selected content has no tape spans recorded")
 
+    dest, dest_connection, dest_warnings = _resolve_destination(
+        db, destination_path=destination_path,
+        destination_connection_id=destination_connection_id,
+        destination_subpath=destination_subpath,
+    )
+
     state = get_hardware().library_status()
     by_tape: dict[int, list[ContentTapeSpan]] = {}
     for span in spans:
         by_tape.setdefault(span.tape_id, []).append(span)
 
-    warnings: list[str] = []
+    warnings: list[str] = list(dest_warnings)
     plan_tapes = []
     for tape_id, tspans in by_tape.items():
         tape = db.get(Tape, tape_id)
@@ -132,7 +179,6 @@ def prepare_restore(
             "files": files,
         })
 
-    dest = destination_path or str(get_settings().data_dir / "restores")
     plan = {
         "destination_path": dest,
         "include_manifests": include_manifests,
@@ -145,6 +191,7 @@ def prepare_restore(
         sequence_container_ids=seq_ids,
         content_item_ids=item_ids,
         destination_path=dest,
+        destination_connection_id=dest_connection.id if dest_connection else None,
         include_manifests=include_manifests,
         status=RestoreStatus.ready if not warnings else RestoreStatus.pending,
         plan=plan,
@@ -154,6 +201,9 @@ def prepare_restore(
     db.flush()
     record_audit(db, actor=requested_by, action="restore.prepared", entity_type="restore",
                  entity_id=req.id, detail={"tapes": [t["barcode"] for t in plan_tapes],
+                                           "destination": dest,
+                                           "destination_connection": dest_connection.hostname
+                                           if dest_connection else None,
                                            "warnings": warnings})
     db.commit()
     return req

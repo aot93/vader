@@ -116,10 +116,15 @@ class RestoreStatus(str, enum.Enum):
     cancelled = "cancelled"
 
 
-class SourceHealth(str, enum.Enum):
+class ConnectionHealth(str, enum.Enum):
     unknown = "unknown"
     healthy = "healthy"
     unhealthy = "unhealthy"
+
+
+class ConnectionPurpose(str, enum.Enum):
+    ingest = "ingest"
+    restore_destination = "restore_destination"
 
 
 # --- tables ---------------------------------------------------------------
@@ -321,6 +326,10 @@ class RestoreRequest(Base):
     sequence_container_ids: Mapped[list] = mapped_column(JSON, default=list)
     content_item_ids: Mapped[list] = mapped_column(JSON, default=list)
     destination_path: Mapped[str | None] = mapped_column(Text)
+    # Set only when the destination was picked from a restore_destination
+    # Connection rather than typed by hand — destination_path above is always
+    # the fully-resolved path either way; this is purely for display/audit.
+    destination_connection_id: Mapped[int | None] = mapped_column(ForeignKey("connections.id"))
     include_manifests: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[RestoreStatus] = mapped_column(
         Enum(RestoreStatus, native_enum=False, length=16), default=RestoreStatus.pending, index=True
@@ -396,31 +405,51 @@ class LibrarySlot(Base):
     __table_args__ = (UniqueConstraint("slot_kind", "slot_number", name="uq_slot_kind_number"),)
 
 
-class Source(Base):
-    """An operator-configured Windows SMB share (Source Manager design spec
-    v1.0). Vader auto-creates the mount point, a credentials file, and a
-    systemd automount unit for it (see ``app/mounts``) so it can be picked as a
-    write job's ingest root without any manual mount setup. Exactly one source
-    per hostname — the mount path is derived from the hostname alone.
+class Connection(Base):
+    """An operator-configured Windows SMB share (originally "Source Manager
+    design spec v1.0"; renamed/extended to cover restore destinations too).
+    Vader auto-creates the mount point, a credentials file, and a systemd
+    automount unit for it (see ``app/mounts``).
+
+    ``purpose`` fixes how the mount is provisioned, for good:
+
+    * ``ingest`` — mounted **read-only**, offered as a write-job source root.
+      This is the original, unchanged behaviour.
+    * ``restore_destination`` — mounted **read-write**, offered as a restore
+      target. A distinct mount (own unit name / mount dir / credentials file)
+      even for the same hostname as an existing ingest connection, so an
+      ingest mount's read-only-ness is never touched by adding a restore
+      destination for the same machine.
+
+    Purpose is set once at creation and is not editable — changing it would
+    mean re-provisioning the mount with different permissions, which is
+    deliberately not offered as an in-place edit. Exactly one connection per
+    ``(hostname, purpose)`` pair.
 
     The password is used once, at creation, to write the credentials file, and
     is never stored here or anywhere else in the database.
     """
 
-    __tablename__ = "sources"
-    __table_args__ = (UniqueConstraint("hostname", name="uq_source_hostname"),)
+    __tablename__ = "connections"
+    __table_args__ = (
+        UniqueConstraint("hostname", "purpose", name="uq_connection_hostname_purpose"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     hostname: Mapped[str] = mapped_column(String(255), index=True)
     share: Mapped[str] = mapped_column(String(255))
+    purpose: Mapped[ConnectionPurpose] = mapped_column(
+        Enum(ConnectionPurpose, native_enum=False, length=32),
+        default=ConnectionPurpose.ingest, index=True,
+    )
     mount_path: Mapped[str] = mapped_column(String(512))
     credentials_path: Mapped[str] = mapped_column(String(512))
     unit_name: Mapped[str] = mapped_column(String(255))
     smb_version: Mapped[str] = mapped_column(String(16), default="3.0")
     domain: Mapped[str | None] = mapped_column(String(128))
     username: Mapped[str] = mapped_column(String(255))
-    last_health: Mapped[SourceHealth] = mapped_column(
-        Enum(SourceHealth, native_enum=False, length=16), default=SourceHealth.unknown, index=True
+    last_health: Mapped[ConnectionHealth] = mapped_column(
+        Enum(ConnectionHealth, native_enum=False, length=16), default=ConnectionHealth.unknown, index=True
     )
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)

@@ -38,9 +38,24 @@
 <div class="panel">
   <p class="muted">{{ hits|length }} result(s). Tick items and prepare a guided restore.</p>
   <div class="row" style="margin-bottom:10px">
-    <div><label>Restore destination path (blank = data/restores/…)</label><input type="text" name="destination_path" placeholder="/mnt/restore-target"></div>
+    <div><label>Restore destination connection</label>
+      <select name="destination_connection_id">
+        <option value="">— custom path below —</option>
+        {% for c in restore_destinations %}
+        <option value="{{ c.id }}">{{ c.hostname }} / {{ c.share }} ({{ c.mount_path }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div><label>Subpath under connection (optional)</label><input type="text" name="destination_subpath" placeholder="RestoreJob-2027-03"></div>
+    <div><label>…or a custom path on this host (blank = data/restores/…)</label><input type="text" name="destination_path" placeholder="/mnt/restore-target"></div>
+  </div>
+  <div class="row" style="margin-bottom:10px">
     <div style="flex:0"><label>&nbsp;</label><label class="tag"><input type="checkbox" name="include_manifests" value="true"> include manifests (review copy only)</label></div>
     <div style="flex:0"><label>&nbsp;</label><button>Prepare restore</button></div>
+    {% if not restore_destinations %}
+    <div class="tag" style="align-self:center">No restore destinations configured —
+      <a href="/connections/new?purpose=restore_destination">add one</a>, or use a custom path.</div>
+    {% endif %}
   </div>
   <table>
     <tr><th></th><th>Project</th><th>Item</th><th>Type</th><th>Category</th><th>Machine</th><th>Size</th><th>Tapes</th><th>Written</th><th>Verified</th></tr>

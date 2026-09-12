@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}{{ connection.hostname }}{% endblock %}
+{% block body %}
+<h1><code>{{ connection.hostname }}</code>
+  <span class="pill {{ connection.last_health.value }}">{{ connection.last_health.value }}</span>
+  <span class="tag">{{ 'restore destination · read-write' if connection.purpose.value == 'restore_destination' else 'ingest source · read-only' }}</span>
+</h1>
+
+<div class="panel" style="max-width:640px">
+<table>
+  <tr><th>Purpose</th><td>{{ connection.purpose.value }}</td></tr>
+  <tr><th>Share</th><td>{{ connection.share }}</td></tr>
+  <tr><th>Mount path</th><td class="mono">{{ connection.mount_path }}</td></tr>
+  <tr><th>Credentials file</th><td class="mono">{{ connection.credentials_path }}</td></tr>
+  <tr><th>Unit</th><td class="mono">{{ connection.unit_name }}.mount / .automount</td></tr>
+  <tr><th>SMB version</th><td>{{ connection.smb_version }}</td></tr>
+  <tr><th>Username</th><td>{{ connection.username }}{% if connection.domain %} ({{ connection.domain }}){% endif %}</td></tr>
+  <tr><th>Last checked</th><td>{{ connection.last_checked_at | dt }}</td></tr>
+  <tr><th>Last error</th><td>{{ connection.last_error or '—' }}</td></tr>
+  <tr><th>Added</th><td>{{ connection.created_at | dt }}</td></tr>
+</table>
+<p style="margin-top:12px">
+  <form class="inline" method="post" action="/connections/{{ connection.id }}/recheck">
+    <button class="ghost">Recheck now</button>
+  </form>
+  <form class="inline" method="post" action="/connections/{{ connection.id }}/delete">
+    <button class="danger">Remove connection</button>
+  </form>
+</p>
+<p class="tag">Removing a connection disables and deletes its automount unit and
+  credentials file, then unmounts it. It does not touch anything already
+  catalogued or restored through this share.</p>
+</div>
+{% endblock %}

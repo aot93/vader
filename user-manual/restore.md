@@ -48,8 +48,17 @@ written-date range.
 ![Search & Restore, results and restore controls, numbered call-outs](assets/search.png)
 
 1. **Filter form.** Fill any combination and **Search**.
-2. **Restore destination path.** Where the restored tree is written. Leave blank to
-   use `DATA_DIR/restores/restore-<id>/`.
+2. **Restore destination.** Three ways to say where the restored tree is written,
+   in priority order:
+   - **Restore destination connection** — a dropdown of every healthy
+     [restore-destination connection](connections.md#5-restoring-to-a-destination-connection).
+     Picking one wins over the fields below it.
+   - **Subpath under connection** (optional) — only used if a connection is
+     picked; namespaces this restore under its own folder (e.g.
+     `RestoreJob-2027-03`) instead of writing straight into the share's root.
+   - **Custom path on this host** — a raw filesystem path on the Vader VM,
+     used only if no connection is selected. Leave everything blank to use
+     `DATA_DIR/restores/restore-<id>/`.
 3. **Include manifests (review copy only).** Off by default. See §7 — even when on,
    manifests never go into the *deliverable* path.
 4. **Prepare restore.** Builds the plan from the ticked rows and takes you to the
@@ -70,13 +79,17 @@ sequence them.
 ![Restore request detail with numbered call-outs](assets/restore-detail.png)
 
 1. **Header line.** Request id + status pill, who requested it and when, the
-   **destination path**, and whether **manifests** are included (review copy) or
-   excluded.
-2. **Warnings box** (only if there are warnings). Two kinds are generated, and
-   **both are blocking**:
+   **destination path** (linked back to the connection, if one was used), and
+   whether **manifests** are included (review copy) or excluded.
+2. **Warnings box** (only if there are warnings):
    - *tape `<barcode>` is not in the library (location: …) — fetch it before
-     running*
-   - *tape `<barcode>` is flagged DAMAGED — restore may fail*
+     running* — **blocking**, no run button until resolved.
+   - *tape `<barcode>` is flagged DAMAGED — restore may fail* — not blocking;
+     shows a **Run despite warnings** button instead.
+   - *restore destination `<hostname>` is not currently healthy (…) — check
+     Connections before running* — not blocking either, but worth checking
+     [Connections](connections.md) first so the restore doesn't fail on a
+     share that's actually just offline.
 3. **Selected content.** The sequences and items you picked, with their original
    source paths.
 4. **Plan — tapes in load order.** One panel per tape: barcode (linked), status
@@ -137,8 +150,11 @@ There are two kinds of warning, handled differently:
 5. When all tapes are done the request becomes `completed` (or `failed` if any
    file had a problem).
 
-If the destination path was left blank, the output lands in
-`DATA_DIR/restores/restore-<id>/`.
+If a restore-destination connection was picked, the output lands under that
+connection's mount path (plus the subpath, if one was given) exactly as if you
+had typed that resolved path by hand — the restore job itself has no notion of
+"connection", it only ever sees the final destination path. If nothing at all
+was picked or typed, the output lands in `DATA_DIR/restores/restore-<id>/`.
 
 ---
 

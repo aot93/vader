@@ -84,9 +84,9 @@ SHOTS = [
     ]),
     dict(name="search", url="/search?q=seq010", annos=[
         dict(sel="form[action='/search']", n=1),
-        dict(sel="input[name='destination_path']", n=2),
+        dict(sel="select[name='destination_connection_id']", n=2),
         dict(sel="input[name='include_manifests']", n=3),
-        dict(sel="button", nth=2, n=4),
+        dict(sel="form[action='/search/prepare-restore'] button", n=4),
         dict(sel="table tr", nth=1, n=5),
         dict(sel="table td", nth=7, n=6),
     ]),

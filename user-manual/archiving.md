@@ -118,9 +118,9 @@ Notes and edge cases:
 ![New write job form with numbered call-outs](assets/job-write-form.png)
 
 1. **Source path** (required). A directory on this host or a mounted share. The
-   form rejects a path that is not a directory. Healthy shares registered under
-   [Sources](sources.md) appear as suggestions here — pick one instead of
-   setting up a mount by hand.
+   form rejects a path that is not a directory. Healthy ingest connections
+   registered under [Connections](connections.md) appear as suggestions here —
+   pick one instead of setting up a mount by hand.
 2. **Mode.**
    - `standard` — pack tapes fully, automatic spanning (the general project
      archive).

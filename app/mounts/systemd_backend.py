@@ -14,26 +14,27 @@ import subprocess
 from pathlib import Path
 
 from app.config import get_settings
-from app.mounts.base import MountBackend, MountError, SourceSpec
+from app.mounts.base import ConnectionSpec, MountBackend, MountError
 
 _SYSTEMCTL_TIMEOUT = 20
 
 
-def _unit_paths(spec: SourceSpec) -> tuple[Path, Path]:
+def _unit_paths(spec: ConnectionSpec) -> tuple[Path, Path]:
     base = Path(get_settings().smb_systemd_dir)
     return base / f"{spec.unit_name}.mount", base / f"{spec.unit_name}.automount"
 
 
-def _mount_unit(spec: SourceSpec) -> str:
+def _mount_unit(spec: ConnectionSpec) -> str:
+    mode = "ro" if spec.read_only else "rw"
     return (
-        f"[Unit]\nDescription=Mount SMB source {spec.hostname}\n\n"
+        f"[Unit]\nDescription=Mount SMB connection {spec.hostname}\n\n"
         f"[Mount]\nWhat=//{spec.hostname}/{spec.share}\nWhere={spec.mount_path}\n"
         f"Type=cifs\nOptions=credentials={spec.credentials_path},_netdev,nofail,"
-        f"vers={spec.smb_version},ro\n\n[Install]\nWantedBy=multi-user.target\n"
+        f"vers={spec.smb_version},{mode}\n\n[Install]\nWantedBy=multi-user.target\n"
     )
 
 
-def _automount_unit(spec: SourceSpec) -> str:
+def _automount_unit(spec: ConnectionSpec) -> str:
     return (
         f"[Unit]\nDescription=Automount for SMB source {spec.hostname}\n\n"
         f"[Automount]\nWhere={spec.mount_path}\n\n"
@@ -61,7 +62,7 @@ class SystemdMountBackend(MountBackend):
     def mount_root(self) -> Path:
         return Path(get_settings().smb_mount_base)
 
-    def provision(self, spec: SourceSpec, password: str) -> None:
+    def provision(self, spec: ConnectionSpec, password: str) -> None:
         cred_path = Path(spec.credentials_path)
         try:
             cred_path.parent.mkdir(parents=True, exist_ok=True)
@@ -81,7 +82,7 @@ class SystemdMountBackend(MountBackend):
         _systemctl("daemon-reload")
         _systemctl("enable", "--now", automount_unit.name)
 
-    def deprovision(self, spec: SourceSpec) -> None:
+    def deprovision(self, spec: ConnectionSpec) -> None:
         mount_unit, automount_unit = _unit_paths(spec)
         for unit in (automount_unit, mount_unit):
             if unit.exists():
@@ -93,11 +94,12 @@ class SystemdMountBackend(MountBackend):
             _systemctl("daemon-reload")
         Path(spec.credentials_path).unlink(missing_ok=True)
         # Only removed if empty — never recurse-delete whatever the share left
-        # behind (it is a read-only ingest mount, but be careful regardless).
+        # behind (an ingest mount is read-only anyway, but a restore
+        # destination is not — be careful regardless).
         with contextlib.suppress(OSError):
             Path(spec.mount_path).rmdir()
 
-    def check_health(self, spec: SourceSpec) -> tuple[bool, str | None]:
+    def check_health(self, spec: ConnectionSpec) -> tuple[bool, str | None]:
         try:
             os.listdir(spec.mount_path)
             return True, None

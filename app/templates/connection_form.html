@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Add {{ 'restore destination' if purpose == 'restore_destination' else 'ingest source' }}{% endblock %}
+{% block body %}
+{% if purpose == "restore_destination" %}
+<h1>Add a restore destination</h1>
+{% else %}
+<h1>Add an ingest source</h1>
+{% endif %}
+<div class="panel" style="max-width:520px">
+{% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+<form method="post" action="/connections">
+  <input type="hidden" name="purpose" value="{{ purpose }}">
+  <label>Hostname or IP *</label><input type="text" name="hostname" placeholder="WORKSTATION-07" required>
+  <label>Share name *</label><input type="text" name="share" placeholder="Projects" required>
+  <label>Username *</label><input type="text" name="username" required>
+  <label>Password *</label><input type="password" name="password" required>
+  <label>Domain (optional)</label><input type="text" name="domain">
+  <label>SMB version</label>
+  <select name="smb_version">
+    <option value="3.0" selected>3.0</option>
+    <option value="3.02">3.02</option>
+    <option value="3.11">3.11</option>
+    <option value="2.1">2.1</option>
+    <option value="1.0">1.0 (legacy)</option>
+  </select>
+  {% if purpose == "restore_destination" %}
+  <p class="tag">Mounted <strong>read-write</strong>. Even if this hostname already has
+    an ingest source, this is provisioned as a completely separate mount (its own
+    directory, unit and credentials file) — the ingest source's read-only-ness is
+    never touched.</p>
+  {% else %}
+  <p class="tag">Mounted <strong>read-only</strong> — ingest sources can never be used
+    as a write target. Want to restore files back onto this machine instead? Add it
+    again as a <a href="/connections/new?purpose=restore_destination">restore destination</a>.</p>
+  {% endif %}
+  <p class="tag">Vader creates the mount point, a credentials file (mode 600, never
+    stored in the database), and a systemd automount unit, then starts it. The
+    password is used once to write that file and is not kept anywhere else —
+    there is no way to view it again after this form is submitted. Purpose cannot
+    be changed after creation — remove and re-add if you got it wrong.</p>
+  <p><button>Add {{ 'restore destination' if purpose == 'restore_destination' else 'ingest source' }}</button>
+    <a class="btn ghost" href="/connections">Cancel</a></p>
+</form>
+</div>
+{% endblock %}

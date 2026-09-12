@@ -18,6 +18,7 @@ from app.jobs import start_worker, stop_worker
 from app.routers import (
     audit,
     auth_routes,
+    connections,
     dashboard,
     export,
     help,
@@ -25,12 +26,11 @@ from app.routers import (
     library,
     restores,
     search,
-    sources,
     tapes,
 )
-from app.services.source_health_monitor import (
-    start_source_health_monitor,
-    stop_source_health_monitor,
+from app.services.connection_health_monitor import (
+    start_connection_health_monitor,
+    stop_connection_health_monitor,
 )
 from app.web import templates
 
@@ -70,13 +70,13 @@ async def lifespan(_: FastAPI):
     if settings.hardware_backend == "simulator":
         _seed_scratch_tapes()
     worker = start_worker()
-    health_monitor = start_source_health_monitor()
+    health_monitor = start_connection_health_monitor()
     try:
         yield
     finally:
         stop_worker()
         worker.join(timeout=2)
-        stop_source_health_monitor()
+        stop_connection_health_monitor()
         health_monitor.join(timeout=2)
 
 
@@ -88,7 +88,7 @@ app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 app.include_router(auth_routes.router)
 app.include_router(dashboard.router)
-app.include_router(sources.router)
+app.include_router(connections.router)
 app.include_router(library.router)
 app.include_router(tapes.router)
 app.include_router(search.router)

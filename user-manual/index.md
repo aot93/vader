@@ -36,12 +36,12 @@ which is covered in the project `RUNBOOK.md` and only summarised here.
 |---|---|
 | [Getting started](getting-started.md) | Install, environment variables, first run, login. Brief — links to `RUNBOOK.md` for the VM build. |
 | [Dashboard](dashboard.md) | The landing screen: tape counts, catalog totals, library map, jobs in flight, re-verification reminders. |
-| [Sources](sources.md) | Add a Windows SMB share as an auto-mounted, auto-reconnecting ingest root — no manual `mount.cifs` — and pick it on the write-job form. |
+| [Connections](connections.md) | Add a Windows SMB share as an auto-mounted, auto-reconnecting ingest root (read-only, feeds the write job) or restore destination (read-write, a restore's target) — no manual `mount.cifs`. |
 | [Library & drive control](library.md) | Refresh inventory, load / unload, and the Utilities: Format (scratch), Bulk optimize/format (batch job across all free drives), Clean drive, Retire tape. |
 | [Tapes](tapes.md) | The tape list and tape detail page: statuses, capacity, location, offsite pairing, "dedicated to" (greedy), notes, per-tape contents, event and read-error history. |
 | [Archiving](archiving.md) | **Primary chapter.** Preparing a source tree, content classification (Types A–D), starting a write job, standard vs greedy mode, tape spanning, write-time checksums and read-back verify, idempotent re-runs, monitoring, on-tape catalog and manifests. |
 | [Verification](verification.md) | Running a verify job, sample vs full, the re-verification-due list, reading read-error history, responding to a mismatch. |
-| [Restore](restore.md) | **Primary chapter.** Searching, selecting content, the prepare-restore plan (load order, command preview, blocking warnings), running the restore, multi-tape and byte-split reassembly, manifest exclusion. |
+| [Restore](restore.md) | **Primary chapter.** Searching, selecting content, choosing a destination (a local path or a pre-configured restore-destination connection), the prepare-restore plan (load order, command preview, blocking warnings), running the restore, multi-tape and byte-split reassembly, manifest exclusion. |
 | [Search the catalog](search-catalog.md) | Every search filter, how results map to tapes and slots, exporting results. |
 | [Jobs](jobs.md) | The background job system: types, the one-at-a-time worker, progress and heartbeat, cancel, retry, interrupted-on-restart behaviour. |
 | [Exports & durability](exports-durability.md) | Catalog CSV export, the database backup job, on-tape `/_catalog/` and `/_manifests/`, recovering the catalog itself. |
@@ -69,9 +69,11 @@ with the detail.
    **[Library](library.md) → Utilities → Format** (one tape) or
    **→ Bulk optimize / format** (a whole batch of new/repurposed stock at once —
    runs as a job across every free drive).
-4. **If a source machine isn't already mounted,** add it once under
-   [Sources](sources.md) instead of mounting it by hand — it reconnects on its
-   own after that.
+4. **If a source machine isn't already mounted,** add it once as an ingest
+   connection under [Connections](connections.md) instead of mounting it by
+   hand — it reconnects on its own after that. Need to restore back onto a
+   machine instead of the local `data/restores/…`? Add a **restore
+   destination** connection for it too.
 5. **[Jobs](jobs.md) → + Write job** for the general project archive: source path,
    **standard** mode, backup category `project_archive`. See [Archiving](archiving.md).
 5. **[Jobs](jobs.md) → + Write job** for each machine-drive pull: **greedy** mode,

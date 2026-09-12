@@ -54,14 +54,14 @@ anything else is false.
 
 ---
 
-## SMB Source Manager (only used when `SMB_BACKEND=real`)
+## SMB Connection Manager (only used when `SMB_BACKEND=real`)
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `SMB_BACKEND` | `simulator` | `simulator` = same credentials file / mount dir / unit layout under `DATA_DIR/sim/`, no `systemctl` calls, no root needed. `real` = write systemd units under `SMB_SYSTEMD_DIR` and drive them with `systemctl` on this host. |
-| `SMB_MOUNT_BASE` | `/mnt/vader` | Sources are mounted at `<base>/<hostname>`. **`real` only** — the simulator mounts under `DATA_DIR/sim/mounts/<hostname>` instead. |
+| `SMB_MOUNT_BASE` | `/mnt/vader` | Ingest connections are mounted at `<base>/<hostname>`; restore destinations at `<base>/<hostname>-restore` (so the two never collide for the same machine). **`real` only** — the simulator mounts under `DATA_DIR/sim/mounts/` instead. |
 | `SMB_SYSTEMD_DIR` | `/etc/systemd/system` | Where the generated `.mount` / `.automount` unit pair is written. Requires the process to be able to write here and run `systemctl` — root, or a sudoers rule scoped to this app. **`real` only.** |
-| `SMB_HEALTH_INTERVAL_SECONDS` | `300` | How often the background health-check sweep re-checks every configured source (floor of 30s). See [Sources](sources.md). |
+| `SMB_HEALTH_INTERVAL_SECONDS` | `300` | How often the background health-check sweep re-checks every configured connection (floor of 30s). See [Connections](connections.md). |
 
 ---
 

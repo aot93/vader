@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.auth import require_auth
 from app.db import get_db
-from app.models import BackupCategory
+from app.models import BackupCategory, ConnectionPurpose
+from app.services import connection_manager as cm
 from app.services.catalog import SearchFilters, distinct_source_machines, search_content
 from app.services.restore import prepare_restore
 from app.web import templates
@@ -57,6 +58,9 @@ def search_page(
             ("config", "Config / log file (Type C)"),
             ("audio_media", "Audio / media file (Type D)"),
         ],
+        "restore_destinations": cm.list_healthy_connections(
+            db, purpose=ConnectionPurpose.restore_destination
+        ),
     })
 
 
@@ -67,14 +71,22 @@ def prepare_restore_action(
     sequence_ids: list[int] = Form(default=[]),
     item_ids: list[int] = Form(default=[]),
     destination_path: str = Form(""),
+    destination_connection_id: str = Form(""),
+    destination_subpath: str = Form(""),
     include_manifests: bool = Form(False),
 ):
-    req = prepare_restore(
-        db,
-        sequence_container_ids=sequence_ids,
-        content_item_ids=item_ids,
-        destination_path=destination_path.strip() or None,
-        include_manifests=include_manifests,
-        requested_by="operator",
-    )
+    try:
+        req = prepare_restore(
+            db,
+            sequence_container_ids=sequence_ids,
+            content_item_ids=item_ids,
+            destination_path=destination_path.strip() or None,
+            destination_connection_id=int(destination_connection_id)
+            if destination_connection_id.strip() else None,
+            destination_subpath=destination_subpath.strip() or None,
+            include_manifests=include_manifests,
+            requested_by="operator",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RedirectResponse(f"/restores/{req.id}", status_code=303)
