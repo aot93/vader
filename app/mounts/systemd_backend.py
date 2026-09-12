@@ -58,6 +58,9 @@ def _systemctl(*args: str) -> None:
 class SystemdMountBackend(MountBackend):
     backend = "real"
 
+    def mount_root(self) -> Path:
+        return Path(get_settings().smb_mount_base)
+
     def provision(self, spec: SourceSpec, password: str) -> None:
         cred_path = Path(spec.credentials_path)
         try:

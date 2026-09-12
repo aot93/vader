@@ -111,10 +111,9 @@ def test_check_health_transitions_and_recheck(db):
 
     # flip the simulated mount to "down" and recheck
     backend = get_mount_backend()
-    from app.mounts.simulator import _sim_mount_dir
+    from pathlib import Path
 
-    spec = sm._spec_for(source)  # noqa: SLF001 - test reaching into the module under test
-    (_sim_mount_dir(spec) / ".simulate-down").write_text("down")
+    (Path(source.mount_path) / ".simulate-down").write_text("down")
 
     sm.check_health(db, source)
     db.commit()
@@ -128,6 +127,31 @@ def test_check_health_transitions_and_recheck(db):
     ).all()
     assert len(healthy_to_unhealthy) == 1
     assert backend.backend == "simulator"
+
+
+def test_mount_path_is_the_real_backend_mount_root_not_a_hardcoded_setting(db):
+    """Regression: Source.mount_path must come from the active backend's
+    mount_root(), not always be built from smb_mount_base — otherwise a
+    'healthy' source under the simulator points a write job at a path the
+    simulator never actually created (settings.smb_mount_base is /mnt/vader,
+    which the simulator backend never touches)."""
+    from pathlib import Path
+
+    source = sm.create_source(db, hostname="WS12B", share="A", username="a", password="p")
+    db.commit()
+
+    backend = get_mount_backend()
+    assert source.mount_path == str(backend.mount_root() / "WS12B")
+    assert not source.mount_path.startswith("/mnt/vader")  # simulator backend in tests
+
+    mount_dir = Path(source.mount_path)
+    assert mount_dir.is_dir()
+
+    sm.check_health(db, source)
+    db.commit()
+    assert source.last_health == SourceHealth.healthy
+    # exactly what the write-job form's suggested path must satisfy
+    assert mount_dir.is_dir()
 
 
 def test_list_healthy_sources_only_returns_healthy(db):

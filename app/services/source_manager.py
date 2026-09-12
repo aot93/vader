@@ -10,7 +10,6 @@ audit logging.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -62,10 +61,15 @@ def create_source(
         raise ValueError(f"a source for {hostname} already exists")
 
     settings = get_settings()
+    backend = get_mount_backend()
     source = Source(
         hostname=hostname,
         share=share,
-        mount_path=str(Path(settings.smb_mount_base) / hostname),
+        # Ask the backend where it actually mounts things — the simulator's
+        # root is not smb_mount_base, and a Source.mount_path that points
+        # somewhere the backend never touches is exactly the "healthy but the
+        # write-job source path doesn't exist" bug.
+        mount_path=str(backend.mount_root() / hostname),
         credentials_path=str(settings.data_dir / "smb_credentials" / f"{hostname}.creds"),
         unit_name=unit_name_for(hostname),
         smb_version=smb_version,
@@ -73,7 +77,6 @@ def create_source(
         username=username,
     )
 
-    backend = get_mount_backend()
     try:
         backend.provision(_spec_for(source), password)
     except MountError as exc:

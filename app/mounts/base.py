@@ -87,6 +87,15 @@ class MountBackend(abc.ABC):
     backend: str = "abstract"
 
     @abc.abstractmethod
+    def mount_root(self):
+        """Base directory this backend actually mounts sources under —
+        ``<root>/<hostname>`` is the real, listable path for a given source.
+        The simulator's root is *not* ``smb_mount_base``; callers must ask the
+        backend rather than assume a fixed setting, or the path stored on the
+        :class:`~app.models.Source` row can point somewhere the backend never
+        touches."""
+
+    @abc.abstractmethod
     def provision(self, spec: SourceSpec, password: str) -> None:
         """Create the credentials file, mount dir and automount unit, then
         enable + start it. Must be safe to call twice (re-running creation
