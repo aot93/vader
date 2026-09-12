@@ -1,9 +1,9 @@
 # Library & drive control
 
 **What this covers:** the `/library` screen — the day-to-day physical operations:
-refreshing the inventory, loading and unloading tapes by hand, and the four
-deliberate Utility actions (Format, Clean drive, Retire tape). Every action here
-is written to the tape-event log and, for most, the [audit log](audit-log.md).
+refreshing the inventory, loading and unloading tapes by hand, and the Utility
+actions (Format, Bulk optimize/format, Clean drive, Retire tape). Every action
+here is written to the tape-event log and, for most, the [audit log](audit-log.md).
 
 This screen replaces the ML3 changer web page. During a write or restore **job**
 you do *not* need to load and unload here — the job does that itself. Use this
@@ -28,17 +28,21 @@ page for setup, for recovering from a wedged state, and for the Utilities.
 3. **Slots.** The full storage-slot map: slot number, barcode (or `—`), a
    *cleaning* tag for a cleaning cartridge, and a status pill for any slot whose
    barcode is a known tape (`scratch` / `active` / `full` / …).
-4. **Utilities → Format (mkltfs).** Prepares a tape for LTFS use. **Refuses unless
-   the tape's catalog status is `scratch`**, unless you tick **force**. Fields:
-   *Drive* (the tape must already be loaded in that drive), *Barcode*, *force*.
-   On success the tape is (re)set to `scratch`, its used-bytes reset to 0, its
-   write-pass count incremented by one, and any "dedicated to" (greedy) marker
-   cleared.
-5. **Utilities → Clean drive.** Loads a cleaning cartridge from the given slot into
+4. **Utilities → Format (mkltfs).** Prepares a **single, already-loaded** tape for
+   LTFS use. **Refuses unless the tape's catalog status is `scratch`**, unless you
+   tick **force**. Fields: *Drive* (the tape must already be loaded in that
+   drive), *Barcode*, *force*. On success the tape is (re)set to `scratch`, its
+   used-bytes reset to 0, its write-pass count incremented by one, and any
+   "dedicated to" (greedy) marker cleared. This is an immediate action, not a job
+   — use it for one tape you already have sitting in a drive.
+5. **Utilities → Bulk optimize / format.** For preparing many tapes at once
+   (e.g. a new batch of LTO-9 stock before an annual run). Opens the
+   [new batch format job](jobs.md#job-types) form — see [below](#batch-optimize-format-many-tapes-at-once).
+6. **Utilities → Clean drive.** Loads a cleaning cartridge from the given slot into
    the drive, runs the cleaning cycle, and unloads it. Fields: *Drive*, *Cleaning
    cartridge slot*. The slot must actually hold a cleaning cartridge or the action
    fails. Logged as a `clean` tape event.
-6. **Utilities → Retire tape.** Marks a tape `retired` in the catalog and appends
+7. **Utilities → Retire tape.** Marks a tape `retired` in the catalog and appends
    the reason to its notes. **Does not touch the physical tape** and does not need
    it to be in the library. A retired tape is excluded from the writable pool and
    from the re-verification reminder. Fields: *Barcode*, *Reason*. Redirects to the
@@ -83,6 +87,35 @@ page for setup, for recovering from a wedged state, and for the Utilities.
    **force**.
 4. **Format tape.** The tape is now `scratch` and ready for a write job.
 
+### Batch optimize / format many tapes at once
+
+Use this instead of the single-tape Format above when you're preparing a whole
+new batch of stock — it does **not** require loading tapes into drives by hand
+first; it does that itself, tape by tape, across every drive that's free.
+
+1. **Utilities → Bulk optimize / format** → opens the new batch-format job form.
+   The barcode list is **pre-filled with every tape currently catalogued as
+   `scratch`**; edit it (one barcode per line, or comma-separated) to the actual
+   set you want to run.
+2. Tick **force** only if some of the listed tapes aren't `scratch` and you
+   genuinely mean to wipe/repurpose them.
+3. **Queue batch format job.** Vader checks every listed tape's status *before*
+   touching any hardware — the whole batch is refused up front if one isn't
+   `scratch` and you didn't tick force, so it can't fail partway through.
+4. Track it like any other job on the [Jobs](jobs.md#job-types) page. Each free
+   drive picks up the next tape from the list on its own: load → `mkltfs`
+   (which performs LTFS's built-in media-optimize pass as part of formatting —
+   there is no separate "optimize" step) → unload back to its home slot → next
+   tape. One bad tape is recorded as failed without stopping the rest of the
+   batch; the finished job's **Result** lists which barcodes succeeded, which
+   failed (with why), and which were skipped if you cancelled partway through.
+
+> Formatting/optimizing can take a long time per tape — up to ~2 hours on
+> LTO-9 with some LTFS builds, since the format step always re-runs the
+> optimize pass regardless of the tape's prior state. A batch of many tapes is
+> exactly why this runs as a background job spread across every free drive
+> rather than one at a time.
+
 ### Retire a tape pulled from rotation
 
 1. **Utilities → Retire tape**: enter the *Barcode* and a *Reason*
@@ -100,6 +133,7 @@ page for setup, for recovering from a wedged state, and for the Utilities.
 | Load | `slot`, `drive` | Slot must be occupied; drive must be empty. |
 | Unload | `slot`, `drive` | Drive must be loaded; target slot must be free. |
 | Format | `drive`, `barcode`, `force` | Tape must be loaded in `drive`. Blocks non-`scratch` tapes unless `force`. |
+| Bulk optimize / format | `barcodes` (list), `force` | Runs as a job, not immediately. Loads/formats/unloads each tape itself, across every free drive. Blocks non-`scratch` tapes unless `force`. |
 | Clean | `drive`, `cleaning_slot` | `cleaning_slot` must hold a cleaning cartridge. |
 | Retire | `barcode`, `reason` | Catalog-only; physical tape untouched. |
 

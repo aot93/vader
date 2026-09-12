@@ -38,10 +38,13 @@ can also be started from the [tape page](tapes.md) and the
 | `verify` | Jobs → + Verify job; Tape page; Dashboard re-verify box | re-read + re-hash a tape's content, log read errors. [Verification](verification.md) |
 | `restore` | Restore request → Run restore | load tapes in order, copy real content back, reassemble splits. [Restore](restore.md) |
 | `backup` | Jobs → Run catalog backup + CSV export | write the full-catalog CSV to `DATA_DIR/exports/` and a DB dump to `BACKUP_DIR`. [Exports & durability](exports-durability.md) |
+| `batch_format` | Library → Utilities → Bulk optimize / format | cycle a list of tapes through every free drive: load → `mkltfs` (format + LTFS's built-in media-optimize pass) → unload → next tape. [Library](library.md#batch-optimize-format-many-tapes-at-once) |
 
-> Format, Clean and Inventory are **not** background jobs — they run immediately
-> from the [Library](library.md) page and are recorded as tape events. These four
-> are the only job types.
+> Single-tape Format, Clean and Inventory are **not** background jobs — they run
+> immediately from the [Library](library.md) page and are recorded as tape
+> events. **Bulk** optimize/format is the one exception: formatting many tapes
+> can run for hours, so it gets the job table's progress tracking, cancellation
+> and crash recovery instead.
 
 ---
 
@@ -56,6 +59,13 @@ with **a single background worker thread** inside the application process:
 - So a second job you start while one is running sits at `queued` — that is
   normal, not stuck. The [Dashboard](dashboard.md) "Jobs in flight" panel shows
   both.
+
+`batch_format` is still just one job on the queue, claimed by the same single
+worker — it doesn't let two jobs run at once. What's different is *inside* that
+one job: since the changer's robotic arm can only move one tape at a time but
+each drive can format independently once loaded, a batch-format job loads one
+tape per free drive and lets the (slow — up to ~2h on LTO-9) `mkltfs` calls run
+concurrently, only serialising the actual load/unload moves.
 
 Stopping `uvicorn` stops the worker cleanly.
 

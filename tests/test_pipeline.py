@@ -181,11 +181,23 @@ def test_batch_format_cycles_tapes_through_free_drives(seeded):
     assert job.result["failed"] == {}
 
     db.expire_all()
+    from app.models import EventResult, TapeEvent, TapeEventType
+
     for barcode in barcodes:
         tape = db.scalar(select(Tape).where(Tape.barcode == barcode))
         assert tape.status == TapeStatus.scratch
         assert tape.used_bytes == 0
         assert tape.write_pass_count == 1
+
+        # a batch format must log the same tape_events a single-tape format
+        # would (load, format, unload), not just load/unload.
+        events = db.scalars(
+            select(TapeEvent).where(TapeEvent.tape_id == tape.id)
+        ).all()
+        event_types = {e.event_type for e in events}
+        assert TapeEventType.format in event_types
+        format_event = next(e for e in events if e.event_type == TapeEventType.format)
+        assert format_event.result == EventResult.success
 
     # every tape must have been returned to a storage slot, not left in a drive
     state = get_hardware().library_status()

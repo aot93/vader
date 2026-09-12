@@ -15,6 +15,7 @@ project `RUNBOOK.md` §8 and `docs/LTO-Archive-VM-Setup.md`.
 | Write job result has entries in `readback_mismatches` | A file did not survive the copy to LTFS intact | See §3 |
 | `mkltfs` / `ltfs` *not found* | Tape toolchain not installed where the app can see it | Install `mt-st mtx sg3-utils ltfs lsscsi`; restart |
 | Format refuses: *status is 'active', not 'scratch'* | Guard against wiping a catalogued tape | See §4 |
+| Batch format job fails: *no free drives available* | Every drive is already loaded/mounted | See §4 |
 | Verify reports `mismatches` or `read_errors` | Content changed on tape, or the tape is degrading | See §5 |
 | Restore shows **Cannot run yet** with no run button | A required tape is *not in the library* | See §6 |
 | Restore ran but ended `failed` with `problems` | A `DAMAGED` tape was attempted and some files were unreadable | See §6 |
@@ -87,13 +88,24 @@ completed and the rest of the content is fine, but:
 ## 4. Format refuses the tape
 
 Format (`mkltfs`) blocks any tape whose catalog status is not `scratch`, to stop
-you wiping a tape that still has catalogued content.
+you wiping a tape that still has catalogued content. The same guard applies to
+**Bulk optimize / format** ([Library](library.md#batch-optimize-format-many-tapes-at-once)) —
+it checks *every* listed barcode before touching any hardware, so one non-scratch
+tape in a batch of twenty fails the whole batch up front rather than partway
+through.
 
-- If the tape really is spent and you mean to reuse it: tick **force** on the
-  Format form. This resets it to `scratch`, zeroes its used bytes, bumps the
-  write-pass count, and clears any "dedicated to" marker.
+- If the tape(s) really are spent and you mean to reuse them: tick **force** on
+  the Format (or batch format) form. This resets each to `scratch`, zeroes its
+  used bytes, bumps the write-pass count, and clears any "dedicated to" marker.
 - If you did **not** mean to wipe it: do nothing — the guard just saved you.
-- The tape must also be **loaded in the drive number** you enter on the form.
+- For single-tape Format, the tape must also be **loaded in the drive number**
+  you enter on the form. Bulk optimize/format loads and unloads tapes itself —
+  you don't load them by hand first.
+- **Bulk optimize/format fails "no free drives available":** every drive is
+  currently loaded or mounted. Unload it from the Library page ([Library](library.md))
+  or wait for the job using it to finish, then queue the batch again.
+- A batch job doesn't stop at the first failed tape — one bad tape is recorded
+  as failed in the finished job's **Result** while the rest continue.
 
 ---
 

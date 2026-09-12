@@ -64,8 +64,9 @@ SHOTS = [
         dict(sel=".grid.cols-2", n=2),
         dict(sel="h2", nth=1, n=3),
         dict(sel="form[action='/library/format']", n=4),
-        dict(sel="form[action='/library/clean']", n=5),
-        dict(sel="form[action='/library/retire']", n=6),
+        dict(sel="a[href='/jobs/new/batch_format']", n=5),
+        dict(sel="form[action='/library/clean']", n=6),
+        dict(sel="form[action='/library/retire']", n=7),
     ]),
     dict(name="tapes-list", url="/tapes", annos=[
         dict(sel="a[href='/tapes/new']", n=1),

@@ -36,6 +36,7 @@ application action (`verify.completed`, with the result summary in `detail`) and
 | Library → Refresh inventory | `library.inventory` | `inventory` |
 | Library → Load / Unload | — | `load` / `unload` |
 | Library → Format | `tape.format` (with `force` flag) | `format` |
+| Library → Bulk optimize / format | `tape.format` per tape (with `force` + `batch: true`) | `load` / `format` / `unload` per tape |
 | Library → Clean drive | `drive.clean` | `clean` |
 | Library → Retire tape | `tape.retire` (with reason) | `retire` |
 | Tapes → Register / Edit | `tape.create` / `tape.edit` | — |

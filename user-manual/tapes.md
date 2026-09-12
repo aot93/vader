@@ -29,7 +29,7 @@ One row in the tape database = one physical LTO cartridge, keyed by barcode.
 
 | Status | Meaning | How a tape gets here |
 |---|---|---|
-| `scratch` | Blank / available. The write job may format it and span onto it. | Auto-registered on inventory; set by **Format**; set manually. |
+| `scratch` | Blank / available. The write job may format it and span onto it. | Auto-registered on inventory; set by **Format** or **Bulk optimize / format**; set manually. |
 | `active` | Holds catalogued content and still has room. | Set automatically at the end of a write job when the tape has more than 2% free. |
 | `full` | Holds catalogued content and is essentially full. | Set automatically at the end of a write job when less than 2% of capacity is free. |
 | `archived` | Written, verified, and sent to permanent offsite storage. Excluded from the writable pool; still appears in the re-verify reminder and counts toward "written tapes" on the dashboard. | **Set manually** on the tape page (Status → `archived`) once the tape is offsite. |
@@ -90,8 +90,8 @@ not written to again.
 > for a given source machine, every tape it writes gets stamped with that machine
 > name. From then on the allocator will only put *that* machine's data on the
 > tape, and will not span that machine's data onto a tape belonging to anyone
-> else. **Format** clears the marker. You cannot set it by hand on this page — it
-> is managed by the write job. See [Archiving](archiving.md).
+> else. **Format** (single-tape or bulk) clears the marker. You cannot set it by
+> hand on this page — it is managed by the write job. See [Archiving](archiving.md).
 
 ---
 

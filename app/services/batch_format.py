@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from app.db import session_scope
 from app.hardware import HardwareError, get_hardware
-from app.models import Tape, TapeStatus
+from app.models import EventResult, Tape, TapeEventType, TapeStatus
 from app.services import library as lib
 from app.services.audit import record_audit
 
@@ -129,8 +129,17 @@ def run_batch_format(
                 try:
                     progress(done, total, f"drive {drive_number}: formatting/optimizing {barcode}")
                     with session_scope() as s:
-                        get_hardware().mkltfs(drive_number, barcode)
                         tape = s.scalar(select(Tape).where(Tape.barcode == barcode))
+                        event = lib.log_event(
+                            s, event_type=TapeEventType.format, tape_id=tape.id if tape else None,
+                            drive_number=drive_number, initiated_by=initiated_by, job_id=job_id,
+                        )
+                        try:
+                            get_hardware().mkltfs(drive_number, barcode)
+                        except HardwareError as exc:
+                            lib.finish_event(s, event, EventResult.error, str(exc))
+                            raise
+                        lib.finish_event(s, event, EventResult.success)
                         if tape:
                             tape.status = TapeStatus.scratch
                             tape.used_bytes = 0
