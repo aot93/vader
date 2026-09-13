@@ -209,6 +209,35 @@ existing archive set.
    paths — these can shift on reboot, so consider udev rules for stable names if you'll script against
    them (`/dev/tape/by-id/...` is often already populated on Ubuntu).
 
+### 6.1 Device permissions
+
+All of the commands below use `sudo` because the device nodes default to
+`root:root` (or `root:tape`) at `0660` — that's fine for this manual dry run.
+**Vader itself must run as root in production** (see `RUNBOOK.md` §3): its
+`real` hardware backend calls `mtx`/`mt`/`mkltfs`/`ltfs` directly with no
+`sudo`, and `mkltfs`/`ltfs` issue `SG_IO` through the `st` driver on
+`/dev/nst*`, which the kernel gates on `CAP_SYS_RAWIO` — device-node group
+permissions alone don't grant that, only root (or `setcap cap_sys_rawio+ep`
+on the binary, which `apt upgrade` silently wipes, so don't rely on it).
+
+If you want to run any of steps 2–7 below **without** `sudo` for convenience
+(e.g. quick manual checks as a non-root account), a udev rule covers `mtx`
+and drive status/read/write, though not `mkltfs`/`ltfs` for the reason above:
+
+```bash
+sudo tee /etc/udev/rules.d/60-lto-library.rules > /dev/null <<'EOF'
+KERNEL=="sg[0-9]*", SUBSYSTEM=="scsi_generic", ATTRS{type}=="8", GROUP="tape", MODE="0660"
+KERNEL=="sg[0-9]*", SUBSYSTEM=="scsi_generic", ATTRS{type}=="1", GROUP="tape", MODE="0660"
+KERNEL=="nst[0-9]*", SUBSYSTEM=="scsi_tape", GROUP="tape", MODE="0660"
+KERNEL=="st[0-9]*",  SUBSYSTEM=="scsi_tape", GROUP="tape", MODE="0660"
+EOF
+sudo usermod -aG tape "$USER"
+sudo udevadm control --reload-rules
+sudo udevadm trigger --subsystem-match=scsi_generic --subsystem-match=scsi_tape
+```
+(`ATTRS{type}=="8"` matches the changer, `=="1"` matches the tape drives —
+log out and back in for the new group membership to take effect.)
+
 2. **Test changer control:**
    ```bash
    sudo mtx -f /dev/sg<changer_node> status

@@ -61,6 +61,17 @@ background worker thread inside the process; stopping uvicorn stops it cleanly.
 Any job left `running` when the process dies is marked **interrupted** on the
 next start — re-run it from the job page (write and verify are idempotent).
 
+**Run it as root.** This is intentional, not an oversight — leave `User=`
+unset in the unit below. `mtx` (via `/dev/sg*`) works fine for any account in
+the `tape` group (see VM-setup doc §6.1), but `mkltfs`/`ltfs` issue `SG_IO`
+through the `st` driver on `/dev/nst*`, which the kernel gates on
+`CAP_SYS_RAWIO` regardless of device-node permissions — only root has it. The
+alternative (`setcap cap_sys_rawio+ep` on those binaries) is fragile: any
+`apt upgrade` of the tape toolchain silently wipes the capability and the next
+format job fails with a cryptic `Cannot open device: inquiry failed` deep in
+the `mkltfs` log. Root sidesteps the whole class of problem, and this VM is
+single-purpose and network-isolated, so the privilege cost is low.
+
 A `systemd` unit is fine and simple:
 
 ```ini
@@ -73,6 +84,7 @@ WorkingDirectory=/opt/vader
 EnvironmentFile=/opt/vader/.env
 ExecStart=/opt/vader/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=on-failure
+# No User= — must run as root; see note above.
 
 [Install]
 WantedBy=multi-user.target
@@ -156,6 +168,7 @@ createdb vader_restore_test && psql vader_restore_test < that_file
 |---|---|
 | Dashboard: "Library unreachable" | `HARDWARE_BACKEND`, `CHANGER_DEVICE`; run `sudo mtx -f $CHANGER_DEVICE status` by hand; device node moved? |
 | `mkltfs` / `ltfs` "not found" | tape toolchain not installed in the app's `PATH` |
+| `mkltfs` fails deep in its log with `SG_IO ioctl` / `Cannot open device: inquiry failed` even though `mtx` works fine | the Vader process isn't running as root (see §3) — `mkltfs`/`ltfs` need `CAP_SYS_RAWIO` for `/dev/nst*`, which plain file permissions don't grant; confirm with `ps -eo user,cmd \| grep uvicorn` |
 | Write job fails "out of scratch tapes" | load more blank tapes, Refresh inventory, re-run the job (idempotent) |
 | Batch format job fails "no free drives available" | a drive is already loaded/mounted from another action — unload it from the Library page, or wait for it to finish, then retry |
 | Job stuck `running` after a crash | restart the app; it becomes `interrupted`; re-run it |
