@@ -20,6 +20,8 @@ should you point Vader at the real hardware.
   .venv/bin/pip install -r requirements.lock.txt
   ```
 - The tape toolchain on the VM: `sudo apt install -y mt-st mtx sg3-utils ltfs lsscsi`.
+  Also install `sudo apt install -y cifs-utils` if you'll use [Connections](user-manual/connections.md)
+  to reach Windows SMB shares (needed for the real CIFS mount below).
   **Note:** this installs the distro's open-source `ltfs` package, not IBM's LTFS
   Single/Library Edition. `mkltfs`'s format step doubles as LTO's media-optimize
   pass (it always re-optimizes on IBM LTFS 2.4.4.0, which is what LTO-9 requires;
@@ -45,6 +47,7 @@ Copy `.env.example` → `.env`. Key values for a real run:
 | `SESSION_SECRET` | any long random string |
 | `AUTH_TOKEN` | leave blank if the VM is network-isolated; else a shared token |
 | `REVERIFY_MONTHS` | default 12 — how stale "last verified" may get before a reminder |
+| `SMB_BACKEND` | `real` — **separate setting from `HARDWARE_BACKEND`, easy to miss.** Defaults to `simulator`, which silently fakes every [Connection](user-manual/connections.md) as an empty local directory instead of a real CIFS mount — it still reports "healthy", but a write job pointed at it fails with "source path not found" |
 
 Device nodes can move across reboots — prefer `/dev/tape/by-id/...` where
 populated, or add udev rules (VM-setup doc §6.1).
@@ -169,6 +172,7 @@ createdb vader_restore_test && psql vader_restore_test < that_file
 | Dashboard: "Library unreachable" | `HARDWARE_BACKEND`, `CHANGER_DEVICE`; run `sudo mtx -f $CHANGER_DEVICE status` by hand; device node moved? |
 | `mkltfs` / `ltfs` "not found" | tape toolchain not installed in the app's `PATH` |
 | `mkltfs` fails deep in its log with `SG_IO ioctl` / `Cannot open device: inquiry failed` even though `mtx` works fine | the Vader process isn't running as root (see §3) — `mkltfs`/`ltfs` need `CAP_SYS_RAWIO` for `/dev/nst*`, which plain file permissions don't grant; confirm with `ps -eo user,cmd \| grep uvicorn` |
+| Write job fails "source path not found" for a path under a Connection's mount | `SMB_BACKEND` is `simulator` (the default) — a Connection can show "healthy" while being a fake local directory. Set `SMB_BACKEND=real`, restart, delete and re-add the connection |
 | Write job fails "out of scratch tapes" | load more blank tapes, Refresh inventory, re-run the job (idempotent) |
 | Batch format job fails "no free drives available" | a drive is already loaded/mounted from another action — unload it from the Library page, or wait for it to finish, then retry |
 | Job stuck `running` after a crash | restart the app; it becomes `interrupted`; re-run it |
