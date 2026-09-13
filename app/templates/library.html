@@ -62,7 +62,9 @@
 <div class="grid cols-4">
   <div class="panel">
     <strong>Format (mkltfs)</strong>
-    <p class="tag">Refuses unless the tape's catalog status is <code>scratch</code>, or you force it.</p>
+    <p class="tag">Formats the tape already loaded in the given drive. Refuses unless the tape's
+      catalog status is <code>scratch</code>, or you force it. Runs as a background job — mkltfs's
+      optimize pass can take up to ~2h on LTO-9 — so this takes you to the job page to watch it.</p>
     <form method="post" action="/library/format">
       <label>Drive</label><input type="number" name="drive" value="0" required>
       <label>Barcode</label><input type="text" name="barcode" required>

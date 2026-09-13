@@ -90,12 +90,13 @@ class JobType(str, enum.Enum):
     restore = "restore"
     backup = "backup"
     batch_format = "batch_format"
-    # Note: single-tape format / clean / inventory are immediate library actions
-    # run from the Library page (recorded as tape_events), not background jobs.
-    # batch_format is the one exception: formatting/optimizing many tapes cycles
-    # them through the drives one load/unload at a time and can run for hours
-    # (mkltfs's optimize pass alone can take ~2h/tape on LTO-9), so it needs the
-    # job table's progress tracking, cancellation and crash-recovery.
+    format = "format"
+    # Note: single-tape clean / inventory are immediate library actions run
+    # from the Library page (recorded as tape_events), not background jobs —
+    # they're quick. format and batch_format are not: mkltfs's optimize pass
+    # alone can take ~2h/tape on LTO-9 even for a single tape, so both need
+    # the job table's progress tracking, cancellation and crash-recovery
+    # rather than blocking the request for hours with no feedback.
 
 
 class JobStatus(str, enum.Enum):

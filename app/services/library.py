@@ -160,7 +160,7 @@ def clean_drive(db: Session, drive: int, cleaning_slot: int, *, initiated_by: st
 
 
 def format_tape(db: Session, drive: int, barcode: str, *, force: bool = False,
-                initiated_by: str = "operator") -> None:
+                initiated_by: str = "operator", job_id: int | None = None) -> None:
     """Wraps mkltfs. Refuses unless the tape's catalog status is 'scratch'
     (or ``force`` for a deliberate repurpose) — guards against wiping a tape
     that still has catalogued content (§3.1)."""
@@ -172,7 +172,7 @@ def format_tape(db: Session, drive: int, barcode: str, *, force: bool = False,
         )
     hw = get_hardware()
     event = log_event(db, event_type=TapeEventType.format, tape_id=tape.id if tape else None,
-                      drive_number=drive, initiated_by=initiated_by)
+                      drive_number=drive, initiated_by=initiated_by, job_id=job_id)
     try:
         hw.mkltfs(drive, barcode)
         if tape:

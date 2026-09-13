@@ -6,6 +6,7 @@ from collections.abc import Callable
 from sqlalchemy.orm import Session
 
 from app.models import Job, JobType
+from app.services import library as lib
 from app.services.batch_format import run_batch_format
 from app.services.export_csv import write_full_catalog_export
 from app.services.restore import run_restore
@@ -30,6 +31,16 @@ def dispatch(db: Session, job: Job, progress: ProgressCb, is_cancelled: CancelCb
 
     if job.job_type == JobType.batch_format:
         return run_batch_format(db, job_id=job.id, progress=progress, is_cancelled=is_cancelled, **params)
+
+    if job.job_type == JobType.format:
+        drive, barcode = params["drive"], params["barcode"]
+        progress(0, 1, f"formatting drive {drive}: {barcode}")
+        lib.format_tape(db, drive, barcode, force=params.get("force", False),
+                        initiated_by=job.created_by, job_id=job.id)
+        db.commit()
+        # progress AFTER commit so the write lock is released first (writer.py does the same)
+        progress(1, 1, "done")
+        return {"drive": drive, "barcode": barcode}
 
     if job.job_type == JobType.backup:
         progress(0, 1, "exporting full catalog CSV")

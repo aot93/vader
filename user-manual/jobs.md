@@ -39,12 +39,14 @@ can also be started from the [tape page](tapes.md) and the
 | `restore` | Restore request → Run restore | load tapes in order, copy real content back, reassemble splits. [Restore](restore.md) |
 | `backup` | Jobs → Run catalog backup + CSV export | write the full-catalog CSV to `DATA_DIR/exports/` and a DB dump to `BACKUP_DIR`. [Exports & durability](exports-durability.md) |
 | `batch_format` | Library → Utilities → Bulk optimize / format | cycle a list of tapes through every free drive: load → `mkltfs` (format + LTFS's built-in media-optimize pass) → unload → next tape. [Library](library.md#batch-optimize-format-many-tapes-at-once) |
+| `format` | Library → Utilities → Format (mkltfs) | `mkltfs` a single, already-loaded tape. [Library](library.md) |
 
-> Single-tape Format, Clean and Inventory are **not** background jobs — they run
+> Single-tape Clean and Inventory are **not** background jobs — they run
 > immediately from the [Library](library.md) page and are recorded as tape
-> events. **Bulk** optimize/format is the one exception: formatting many tapes
-> can run for hours, so it gets the job table's progress tracking, cancellation
-> and crash recovery instead.
+> events; they're quick. **Format** and **Bulk** optimize/format are not:
+> `mkltfs`'s optimize pass can take up to ~2 hours per tape on LTO-9 even for a
+> single tape, so both get the job table's progress tracking, cancellation and
+> crash recovery instead of blocking the Library page for hours.
 
 ---
 

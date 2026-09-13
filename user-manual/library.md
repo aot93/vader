@@ -33,8 +33,11 @@ page for setup, for recovering from a wedged state, and for the Utilities.
    tick **force**. Fields: *Drive* (the tape must already be loaded in that
    drive), *Barcode*, *force*. On success the tape is (re)set to `scratch`, its
    used-bytes reset to 0, its write-pass count incremented by one, and any
-   "dedicated to" (greedy) marker cleared. This is an immediate action, not a job
-   — use it for one tape you already have sitting in a drive.
+   "dedicated to" (greedy) marker cleared. Runs as a background `format` job —
+   mkltfs's optimize pass can take up to ~2 hours on LTO-9, so submitting takes
+   you straight to that job's page to watch progress rather than leaving the
+   Library page hanging — use it for one tape you already have sitting in a
+   drive.
 5. **Utilities → Bulk optimize / format.** For preparing many tapes at once
    (e.g. a new batch of LTO-9 stock before an annual run). Opens the
    [new batch format job](jobs.md#job-types) form — see [below](#batch-optimize-format-many-tapes-at-once).
@@ -85,7 +88,8 @@ page for setup, for recovering from a wedged state, and for the Utilities.
 2. **Utilities → Format**: enter the *Drive* and *Barcode*.
 3. If the tape's status is not `scratch` and you genuinely mean to wipe it, tick
    **force**.
-4. **Format tape.** The tape is now `scratch` and ready for a write job.
+4. **Format tape.** Takes you to the new job's page; once it completes the tape
+   is `scratch` and ready for a write job.
 
 ### Batch optimize / format many tapes at once
 
@@ -132,8 +136,8 @@ first; it does that itself, tape by tape, across every drive that's free.
 |---|---|---|
 | Load | `slot`, `drive` | Slot must be occupied; drive must be empty. |
 | Unload | `slot`, `drive` | Drive must be loaded; target slot must be free. |
-| Format | `drive`, `barcode`, `force` | Tape must be loaded in `drive`. Blocks non-`scratch` tapes unless `force`. |
-| Bulk optimize / format | `barcodes` (list), `force` | Runs as a job, not immediately. Loads/formats/unloads each tape itself, across every free drive. Blocks non-`scratch` tapes unless `force`. |
+| Format | `drive`, `barcode`, `force` | Runs as a `format` job. Tape must already be loaded in `drive`. Blocks non-`scratch` tapes unless `force`. |
+| Bulk optimize / format | `barcodes` (list), `force` | Runs as a `batch_format` job. Loads/formats/unloads each tape itself, across every free drive. Blocks non-`scratch` tapes unless `force`. |
 | Clean | `drive`, `cleaning_slot` | `cleaning_slot` must hold a cleaning cartridge. |
 | Retire | `barcode`, `reason` | Catalog-only; physical tape untouched. |
 

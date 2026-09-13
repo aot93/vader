@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 from app.auth import require_auth
 from app.db import get_db
 from app.hardware import HardwareError, get_hardware
-from app.models import Tape
+from app.jobs import enqueue
+from app.models import JobType, Tape
 from app.services import library as lib
 from app.web import templates
 
@@ -75,13 +76,13 @@ def do_unload(request: Request, slot: int = Form(...), drive: int = Form(...),
 @router.post("/format")
 def do_format(request: Request, drive: int = Form(...), barcode: str = Form(...),
               force: bool = Form(False), db: Session = Depends(get_db)):
-    try:
-        lib.format_tape(db, drive, barcode.strip(), force=force, initiated_by="operator")
-        db.commit()
-        return _render(request, db, notice=f"Formatted {barcode} for LTFS on drive {drive}.")
-    except HardwareError as exc:
-        db.rollback()
-        return _render(request, db, error=str(exc))
+    # Runs as a background job, not inline — mkltfs's optimize pass can take
+    # up to ~2h/tape on LTO-9, so blocking the request would leave the
+    # operator staring at a hung page with no way to tell it's still working.
+    job = enqueue(db, JobType.format,
+                  {"drive": drive, "barcode": barcode.strip(), "force": force})
+    db.commit()
+    return RedirectResponse(f"/jobs/{job.id}", status_code=303)
 
 
 @router.post("/clean")
