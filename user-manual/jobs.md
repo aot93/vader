@@ -40,6 +40,7 @@ can also be started from the [tape page](tapes.md) and the
 | `backup` | Jobs → Run catalog backup + CSV export | write the full-catalog CSV to `DATA_DIR/exports/` and a DB dump to `BACKUP_DIR`. [Exports & durability](exports-durability.md) |
 | `batch_format` | Library → Utilities → Bulk optimize / format | cycle a list of tapes through every free drive: load → `mkltfs` (format + LTFS's built-in media-optimize pass) → unload → next tape. [Library](library.md#batch-optimize-format-many-tapes-at-once) |
 | `format` | Library → Utilities → Format (mkltfs) | `mkltfs` a single, already-loaded tape. [Library](library.md) |
+| `tape_import` | Library → Utilities → Import existing tapes | cycle a list of pre-existing tapes through every free drive: load → mount **read-only** → scan/hash/catalog → unload → next tape. New barcodes register as `archived`, never `scratch`. [Library](library.md#importing-pre-existing-tapes) |
 
 > Single-tape Clean and Inventory are **not** background jobs — they run
 > immediately from the [Library](library.md) page and are recorded as tape

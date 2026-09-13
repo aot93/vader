@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Import existing tapes{% endblock %}
+{% block body %}
+<h1>Import pre-existing tapes</h1>
+<div class="panel" style="max-width:640px">
+<form method="post" action="/jobs/new/tape_import">
+  <label>Tape barcodes * (one per line, or comma-separated)</label>
+  <textarea name="barcodes" rows="8" placeholder="AB0001L9&#10;AB0002L9&#10;AB0003L9" required></textarea>
+  <p class="tag">Load these tapes into the library first. Each must already be LTFS-formatted
+    with real content on it — this reads what's already there, it never formats or writes
+    anything. A barcode Vader hasn't seen before is registered straight to <code>archived</code>
+    status (never <code>scratch</code>), so nothing can pick it up for a future write or format
+    job, no matter what order things happen in afterward.</p>
+
+  <div class="row">
+    <div><label>Project name override (optional)</label><input type="text" name="project_name"></div>
+    <div><label>Source machine (optional, applies to all units)</label><input type="text" name="source_machine"></div>
+  </div>
+
+  <label>Backup category</label>
+  <select name="backup_category">
+    {% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+  </select>
+
+  <p class="tag">Runs in the background, mounting each tape <strong>read-only</strong> and cycling
+    through whichever drives are free: load → mount read-only → scan and classify content exactly
+    like a write job would → hash every file → catalog → unmount → next tape. Can take a long time
+    per tape since it reads the whole thing. Re-running against an already-imported tape skips
+    anything already cataloged from it. One tape's failure doesn't stop the others; check the
+    job's Result for per-tape unit counts and failures.</p>
+  <p><button class="danger">Queue import job</button> <a class="btn ghost" href="/jobs">Cancel</a></p>
+</form>
+</div>
+{% endblock %}

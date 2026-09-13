@@ -17,7 +17,13 @@ page for setup, for recovering from a wedged state, and for the Utilities.
    changer and replaces Vader's cached slot map. Run it whenever tapes have been
    added, removed or swapped outside the app. Any barcode Vader has not seen
    before is **auto-registered as a `scratch` tape** with its slot as the physical
-   location.
+   location. **If you're bringing in tapes that already hold real data — from
+   before Vader existed, or written by other software — don't refresh inventory
+   first, or if you already have, fix their status before running anything else.**
+   A newly-seen barcode has no way to signal "this already has content," so it
+   gets labeled `scratch` (writable/wipeable) regardless of what's actually on
+   it. Use **Import existing tapes** (below) instead — it registers new barcodes
+   straight to `archived`, and also corrects any already mislabeled `scratch`.
 2. **Drives.** One panel per drive, showing the device node, the loaded barcode
    (or *— empty —*), the slot it came from, and the LTFS mount point if mounted.
    - If the drive is **empty**: a *Load from slot* field + **Load** button.
@@ -45,7 +51,12 @@ page for setup, for recovering from a wedged state, and for the Utilities.
    the drive, runs the cleaning cycle, and unloads it. Fields: *Drive*, *Cleaning
    cartridge slot*. The slot must actually hold a cleaning cartridge or the action
    fails. Logged as a `clean` tape event.
-7. **Utilities → Retire tape.** Marks a tape `retired` in the catalog and appends
+7. **Utilities → Import existing tapes.** Brings tapes that already have real
+   content on them — written by something other than Vader, e.g. a Windows LTFS
+   driver — into the catalog, so they're searchable and restorable like anything
+   Vader wrote itself. Opens the [new import job](jobs.md#job-types) form — see
+   [below](#importing-pre-existing-tapes).
+8. **Utilities → Retire tape.** Marks a tape `retired` in the catalog and appends
    the reason to its notes. **Does not touch the physical tape** and does not need
    it to be in the library. A retired tape is excluded from the writable pool and
    from the re-verification reminder. Fields: *Barcode*, *Reason*. Redirects to the
@@ -120,6 +131,42 @@ first; it does that itself, tape by tape, across every drive that's free.
 > exactly why this runs as a background job spread across every free drive
 > rather than one at a time.
 
+### Importing pre-existing tapes
+
+Bringing in an existing archive — tapes with real content already on them,
+written by something other than Vader — into the catalog, so they're
+searchable and restorable exactly like anything Vader wrote itself.
+
+1. Physically load the tapes into the library. **Do not click Refresh
+   inventory first** if Vader has never seen these barcodes — import handles
+   registering them itself, safely. If you already refreshed inventory and
+   they now show `scratch`, that's fine — import corrects it before touching
+   them, just don't run a batch-format job in the meantime.
+2. **Utilities → Import existing tapes** → opens the new import job form.
+   Barcodes (one per line, or comma-separated), plus the same optional
+   project name / source machine / backup category overrides a write job has.
+3. **Queue import job.** Like batch format, it cycles the list across every
+   free drive on its own: load → **mount read-only** → scan and classify
+   content exactly like a write job would → hash every file → catalog →
+   unmount → next tape.
+4. The tape is mounted **read-only for the entire import** — nothing in this
+   job can format it or write to it, enforced at the mount itself, not just by
+   convention. A barcode Vader hasn't seen before is registered straight to
+   `archived` (not `scratch`), so nothing can pick it up for a future write or
+   format job, however it got there.
+5. Track it like any other job. Result lists units imported per tape, or the
+   failure reason; one bad tape doesn't stop the rest. Re-running against an
+   already-imported tape skips content already cataloged from it.
+
+> Each tape's content is cataloged as if it were self-contained. If a shot was
+> originally split across several of these legacy tapes, re-importing each one
+> catalogs its portion separately rather than reconstructing the original
+> split. Also: since there's no external source path to key off, imported
+> content's identity is scoped to the tape itself (`tape://<barcode>/...`) —
+> two different tapes with an identically-named shot folder never collide.
+> The original write date is genuinely unknown, so it's left blank; the
+> catalog date recorded is when it was imported.
+
 ### Retire a tape pulled from rotation
 
 1. **Utilities → Retire tape**: enter the *Barcode* and a *Reason*
@@ -139,6 +186,7 @@ first; it does that itself, tape by tape, across every drive that's free.
 | Format | `drive`, `barcode`, `force` | Runs as a `format` job. Tape must already be loaded in `drive`. Blocks non-`scratch` tapes unless `force`. |
 | Bulk optimize / format | `barcodes` (list), `force` | Runs as a `batch_format` job. Loads/formats/unloads each tape itself, across every free drive. Blocks non-`scratch` tapes unless `force`. |
 | Clean | `drive`, `cleaning_slot` | `cleaning_slot` must hold a cleaning cartridge. |
+| Import existing tapes | `barcodes` (list), `project_name`, `source_machine`, `backup_category` | Runs as a `tape_import` job. Mounts **read-only**; loads/scans/catalogs/unloads each tape itself, across every free drive. New barcodes register as `archived`, never `scratch`. |
 | Retire | `barcode`, `reason` | Catalog-only; physical tape untouched. |
 
 > **Eject / return-to-slot.** The framework design mentions a separate "eject"

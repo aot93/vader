@@ -89,6 +89,14 @@
     </form>
   </div>
   <div class="panel">
+    <strong>Import existing tapes</strong>
+    <p class="tag">Bring pre-existing LTFS tapes (written outside Vader) into the catalog: mounts
+      read-only and never formats or writes anything. New barcodes are registered as
+      <code>archived</code>, not <code>scratch</code>, so they're never picked up for a future
+      write or format job.</p>
+    <p><a class="btn danger" href="/jobs/new/tape_import">New import job →</a></p>
+  </div>
+  <div class="panel">
     <strong>Retire tape</strong>
     <p class="tag">Marks a tape <code>retired</code> in the catalog. Does not touch the physical tape.</p>
     <form method="post" action="/library/retire">

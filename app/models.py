@@ -75,6 +75,7 @@ class TapeEventType(str, enum.Enum):
     clean = "clean"
     retire = "retire"
     eject = "eject"
+    import_tape = "import_tape"
 
 
 class EventResult(str, enum.Enum):
@@ -91,6 +92,7 @@ class JobType(str, enum.Enum):
     backup = "backup"
     batch_format = "batch_format"
     format = "format"
+    tape_import = "tape_import"
     # Note: single-tape clean / inventory are immediate library actions run
     # from the Library page (recorded as tape_events), not background jobs —
     # they're quick. format and batch_format are not: mkltfs's optimize pass

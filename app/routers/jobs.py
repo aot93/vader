@@ -137,6 +137,36 @@ def create_batch_format_job(
     return RedirectResponse(f"/jobs/{job.id}", status_code=303)
 
 
+@router.get("/new/tape_import")
+def new_tape_import_job(request: Request):
+    return templates.TemplateResponse(request, "job_tape_import_form.html", {
+        "categories": [c.value for c in BackupCategory],
+    })
+
+
+@router.post("/new/tape_import")
+def create_tape_import_job(
+    request: Request,
+    db: Session = Depends(get_db),
+    barcodes: str = Form(...),
+    project_name: str = Form(""),
+    source_machine: str = Form(""),
+    backup_category: str = Form("project_archive"),
+):
+    parsed = [b.strip() for b in barcodes.replace(",", "\n").splitlines() if b.strip()]
+    if not parsed:
+        raise HTTPException(status_code=400, detail="no tape barcodes given")
+    params = {
+        "barcodes": parsed,
+        "project_name": project_name.strip() or None,
+        "source_machine": source_machine.strip() or None,
+        "backup_category": backup_category,
+    }
+    job = enqueue(db, JobType.tape_import, params)
+    db.commit()
+    return RedirectResponse(f"/jobs/{job.id}", status_code=303)
+
+
 @router.post("/new/backup")
 def create_backup_job(request: Request, db: Session = Depends(get_db)):
     job = enqueue(db, JobType.backup, {})

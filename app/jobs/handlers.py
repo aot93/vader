@@ -10,6 +10,7 @@ from app.services import library as lib
 from app.services.batch_format import run_batch_format
 from app.services.export_csv import write_full_catalog_export
 from app.services.restore import run_restore
+from app.services.tape_import import run_tape_import
 from app.services.verification import run_verify
 from app.services.writer import run_write
 
@@ -41,6 +42,9 @@ def dispatch(db: Session, job: Job, progress: ProgressCb, is_cancelled: CancelCb
         # progress AFTER commit so the write lock is released first (writer.py does the same)
         progress(1, 1, "done")
         return {"drive": drive, "barcode": barcode}
+
+    if job.job_type == JobType.tape_import:
+        return run_tape_import(db, job_id=job.id, progress=progress, is_cancelled=is_cancelled, **params)
 
     if job.job_type == JobType.backup:
         progress(0, 1, "exporting full catalog CSV")
