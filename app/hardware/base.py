@@ -90,8 +90,10 @@ class TapeHardware(abc.ABC):
         """Format the tape in ``drive`` for LTFS use (``mkltfs``)."""
 
     @abc.abstractmethod
-    def mount_ltfs(self, drive: int) -> Path:
-        """Mount the loaded tape and return the mount point."""
+    def mount_ltfs(self, drive: int, *, read_only: bool = False) -> Path:
+        """Mount the loaded tape and return the mount point. ``read_only``
+        must make writing to the mount actually fail, not just be a hint —
+        callers (e.g. tape import) rely on it as a hard safety guarantee."""
 
     @abc.abstractmethod
     def unmount_ltfs(self, drive: int) -> None: ...

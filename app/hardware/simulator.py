@@ -148,7 +148,7 @@ class SimulatedHardware(TapeHardware):
         vol.mkdir(parents=True)
         (vol / ".ltfs_label").write_text(f"barcode={barcode}\n")
 
-    def mount_ltfs(self, drive: int) -> Path:
+    def mount_ltfs(self, drive: int, *, read_only: bool = False) -> Path:
         dr = self._drive(drive)
         barcode = dr["loaded_barcode"]
         if barcode is None:
@@ -165,15 +165,25 @@ class SimulatedHardware(TapeHardware):
             else:
                 shutil.rmtree(mp)
         os.symlink(vol, mp)
+        # Actually enforce read-only (not just a hint) by stripping the write
+        # bit on the real volume dir the symlink points at, so a write through
+        # the mount fails with a real PermissionError — same hard guarantee a
+        # real read-only LTFS/FUSE mount gives.
+        os.chmod(vol, 0o555 if read_only else 0o755)
         dr["mounted"] = True
         self._save()
         return mp
 
     def unmount_ltfs(self, drive: int) -> None:
         dr = self._drive(drive)
+        barcode = dr["loaded_barcode"]
         mp = self.mount_point_for(drive)
         if mp.is_symlink():
             mp.unlink()
+        if barcode:
+            vol = self._volume_dir(barcode)
+            if vol.exists():
+                os.chmod(vol, 0o755)  # undo any read-only mount, always safe
         dr["mounted"] = False
         dr["activity"] = "idle"
         self._save()

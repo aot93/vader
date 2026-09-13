@@ -115,11 +115,14 @@ class RealHardware(TapeHardware):
         dev = self._drive_device(drive)
         self._run(["mkltfs", "-d", dev, "-n", barcode], timeout=7200)
 
-    def mount_ltfs(self, drive: int) -> Path:
+    def mount_ltfs(self, drive: int, *, read_only: bool = False) -> Path:
         dev = self._drive_device(drive)
         mp = self.mount_point_for(drive)
         mp.mkdir(parents=True, exist_ok=True)
-        self._run(["ltfs", "-o", f"devname={dev}", str(mp)], timeout=1800)
+        argv = ["ltfs", "-o", f"devname={dev}"]
+        if read_only:
+            argv += ["-o", "ro"]
+        self._run(argv + [str(mp)], timeout=1800)
         return mp
 
     def unmount_ltfs(self, drive: int) -> None:
