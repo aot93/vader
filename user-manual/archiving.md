@@ -129,12 +129,19 @@ Notes and edge cases:
 3. **Greedy source** (required for greedy mode). The machine / source name, e.g.
    `Machine-07`. In greedy mode this is also used as the source machine for every
    unit if you leave field 5 blank.
-4. **Project name override** and **Source machine** (both optional). Override the
+4. **Target tape** (optional). Pin the job to start on one specific tape instead
+   of letting the allocator pick — pre-filled suggestions are every `scratch`/
+   `active` tape currently present in the library. Must actually be in a slot
+   right now; a catalog entry for a tape that's been moved, retired elsewhere,
+   or dropped from a reseeded library is refused with a clear error rather than
+   failing mid-job. Once the target tape is full, normal automatic spanning
+   takes over and picks from the rest of the pool as usual.
+5. **Project name override** and **Source machine** (both optional). Override the
    derived project name; stamp a source machine onto every unit.
-5. **Backup category.** `project_archive` (default) or `machine_drive_backup`.
+6. **Backup category.** `project_archive` (default) or `machine_drive_backup`.
    Use `machine_drive_backup` for greedy machine pulls.
-6. **Drive.** Which drive number the job should use (default `0`).
-7. **Queue write job.** The job is created `queued`; the worker picks it up when
+7. **Drive.** Which drive number the job should use (default `0`).
+8. **Queue write job.** The job is created `queued`; the worker picks it up when
    no other job is running. You are redirected to the job page.
 
 ### Standard vs greedy — when to use which

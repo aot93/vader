@@ -75,3 +75,23 @@ def test_standard_mode_fills_active_tape_before_scratch():
     scratch = _tape(2, cap=1000)
     alloc = TapeAllocator([active], [scratch]).allocate([_seq(4, 100)])
     assert alloc.placements[0].barcode == "T001"
+
+
+def test_target_tape_is_tried_before_any_other_open_or_scratch_tape():
+    active = _tape(1, cap=1000, used=500, status="active")  # would normally win
+    scratch = [_tape(2, cap=1000), _tape(3, cap=1000)]
+    alloc = TapeAllocator([active], scratch, target_barcode="T003").allocate([_seq(4, 100)])
+    assert alloc.placements[0].barcode == "T003"
+
+
+def test_target_tape_falls_back_to_normal_spanning_once_full():
+    # 10 frames * 100 = 1000; tapes hold 250 (2 whole frames) each -> needs all 5
+    scratch = [_tape(i, cap=250) for i in range(1, 6)]
+    alloc = TapeAllocator([], scratch, target_barcode="T003").allocate([_seq(10, 100)])
+    assert alloc.placements[0].barcode == "T003"
+    assert len({p.barcode for p in alloc.placements}) >= 2
+
+
+def test_target_tape_not_available_raises():
+    with pytest.raises(AllocationError):
+        TapeAllocator([], [_tape(1)], target_barcode="NOPE")

@@ -74,6 +74,50 @@ def test_write_is_idempotent(seeded, make_source):
     assert db.query(ContentTapeSpan).count() == n_span
 
 
+def test_write_targets_a_specific_tape(seeded, make_source):
+    db = seeded
+    src = make_source()
+    job = _run(db, JobType.write, {
+        "source_path": str(src), "mode": "standard", "target_barcode": "TEST003L8",
+    })
+    assert job.status == JobStatus.completed, job.error
+    spans = db.scalars(select(ContentTapeSpan)).all()
+    assert spans
+    tape_ids = {s.tape_id for s in spans}
+    tapes = db.scalars(select(Tape).where(Tape.id.in_(tape_ids))).all()
+    assert {t.barcode for t in tapes} == {"TEST003L8"}
+
+
+def test_write_target_tape_not_available_fails_clearly(seeded, make_source):
+    db = seeded
+    src = make_source()
+    job = _run(db, JobType.write, {
+        "source_path": str(src), "mode": "standard", "target_barcode": "NOSUCHTAPE",
+    })
+    assert job.status == JobStatus.failed
+    assert "NOSUCHTAPE" in job.error
+    assert "not available" in job.error
+
+
+def test_write_skips_a_catalog_tape_no_longer_in_the_library(seeded, make_source):
+    """A Tape row can outlive its physical presence (moved by hand, dropped from
+    a reseeded/reset library) — the allocator must not pick it, and must fall
+    through to a tape that's actually there instead of blowing up mid-job."""
+    db = seeded
+    db.add(Tape(barcode="GHOST001L8", status=TapeStatus.scratch,
+                capacity_native_bytes=2_000_000))
+    db.commit()
+
+    src = make_source()
+    job = _run(db, JobType.write, {"source_path": str(src), "mode": "standard"})
+    assert job.status == JobStatus.completed, job.error
+
+    spans = db.scalars(select(ContentTapeSpan)).all()
+    tape_ids = {s.tape_id for s in spans}
+    tapes = db.scalars(select(Tape).where(Tape.id.in_(tape_ids))).all()
+    assert "GHOST001L8" not in {t.barcode for t in tapes}
+
+
 def test_large_sequence_spans_tapes(seeded, tmp_path):
     db = seeded
     # 2 MB tapes; make a shot bigger than one tape

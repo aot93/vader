@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.auth import require_auth
 from app.config import get_settings
 from app.db import get_db
+from app.hardware import get_hardware
 from app.jobs import enqueue
 from app.models import BackupCategory, ConnectionPurpose, Job, JobStatus, JobType, Tape, TapeStatus
 from app.services import connection_manager as cm
@@ -32,10 +33,16 @@ def list_jobs(request: Request, db: Session = Depends(get_db), page: int = 1):
 
 @router.get("/new/write")
 def new_write_job(request: Request, db: Session = Depends(get_db)):
+    present = {s.barcode for s in get_hardware().library_status().slots if s.barcode}
+    available_tapes = db.scalars(
+        select(Tape.barcode).where(Tape.status.in_([TapeStatus.scratch, TapeStatus.active]))
+        .order_by(Tape.barcode)
+    ).all()
     return templates.TemplateResponse(request, "job_write_form.html", {
         "machines": distinct_source_machines(db),
         "categories": [c.value for c in BackupCategory],
         "ingest_connections": cm.list_healthy_connections(db, purpose=ConnectionPurpose.ingest),
+        "available_tapes": [b for b in available_tapes if b in present],
     })
 
 
@@ -46,6 +53,7 @@ def create_write_job(
     source_path: str = Form(...),
     mode: str = Form("standard"),
     greedy_source: str = Form(""),
+    target_barcode: str = Form(""),
     project_name: str = Form(""),
     source_machine: str = Form(""),
     backup_category: str = Form("project_archive"),
@@ -58,6 +66,7 @@ def create_write_job(
         "source_path": str(src),
         "mode": mode,
         "greedy_source": greedy_source.strip() or None,
+        "target_barcode": target_barcode.strip() or None,
         "project_name": project_name.strip() or None,
         "source_machine": source_machine.strip() or None,
         "backup_category": backup_category,

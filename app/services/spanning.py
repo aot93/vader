@@ -17,6 +17,10 @@ Rules implemented
   write). A partially-used tape belonging to another source — or to no source —
   is never touched, so the tape is left partly empty rather than mixed. This
   yields a clean, isolated recovery unit for a single machine's backup.
+* **Target tape (optional).** An operator can pin a job to start on one
+  specific tape (e.g. "use TEST007L8"). That tape is tried before any other
+  open or scratch tape; once it's full, normal automatic spanning takes over
+  and picks from the rest of the pool as usual.
 """
 from __future__ import annotations
 
@@ -82,6 +86,7 @@ class TapeAllocator:
         *,
         greedy: bool = False,
         greedy_source: str | None = None,
+        target_barcode: str | None = None,
     ) -> None:
         self.greedy = greedy
         self.greedy_source = greedy_source
@@ -96,6 +101,27 @@ class TapeAllocator:
             self._open = sorted(writable, key=lambda t: (t.status != "active", -t.used_bytes))
         self._scratch = list(scratch)
         self._result = AllocationResult()
+        if target_barcode is not None:
+            self._pin_target(target_barcode)
+
+    def _pin_target(self, barcode: str) -> None:
+        """Move the requested tape to the front of the open pool, so it's tried
+        before any other tape. Falls back to normal spanning once it's full."""
+        for i, tape in enumerate(self._open):
+            if tape.barcode == barcode:
+                self._open.insert(0, self._open.pop(i))
+                return
+        for i, tape in enumerate(self._scratch):
+            if tape.barcode == barcode:
+                tape = self._scratch.pop(i)
+                tape.needs_format = True
+                self._dedicate(tape)
+                self._open.insert(0, tape)
+                return
+        raise AllocationError(
+            f"target tape {barcode} is not available for writing — it must be "
+            f"'scratch' or 'active' and currently present in the library"
+        )
 
     # --- public --------------------------------------------------------
 

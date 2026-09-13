@@ -24,6 +24,17 @@
   <label>Greedy source (required for greedy mode) — the machine/source name</label>
   <input type="text" name="greedy_source" placeholder="Machine-07">
 
+  <label>Target tape (optional)</label>
+  <input type="text" name="target_barcode" list="available-tapes" placeholder="e.g. AB26010L9">
+  {% if available_tapes %}
+  <datalist id="available-tapes">
+    {% for b in available_tapes %}<option value="{{ b }}">{% endfor %}
+  </datalist>
+  {% endif %}
+  <p class="tag">Start writing on this specific tape instead of letting the allocator pick.
+    Must be <code>scratch</code> or <code>active</code> and currently in the library. Once
+    it's full, normal automatic spanning takes over and picks from the rest of the pool.</p>
+
   <div class="row">
     <div><label>Project name override (optional)</label><input type="text" name="project_name"></div>
     <div><label>Source machine (optional, applies to all units)</label><input type="text" name="source_machine"></div>

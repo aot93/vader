@@ -112,10 +112,17 @@ class _Drive:
 def _tape_views(db: Session, *, greedy: bool, greedy_source: str | None) -> tuple[list[TapeView], list[TapeView]]:
     settings = get_settings()
     default_cap = settings.sim_tape_capacity_bytes
+    # Only offer tapes the changer can actually see right now — a catalog row
+    # can outlive the tape's physical presence (moved by hand, dropped from a
+    # reseeded/reset library), and picking one blows up mid-job instead of at
+    # allocation time.
+    present = {s.barcode for s in get_hardware().library_status().slots if s.barcode}
     writable: list[TapeView] = []
     scratch: list[TapeView] = []
     for tape in db.scalars(select(Tape)).all():
         if tape.status in {TapeStatus.retired, TapeStatus.damaged, TapeStatus.archived}:
+            continue
+        if tape.barcode not in present:
             continue
         cap = tape.capacity_native_bytes or default_cap
         if tape.capacity_native_bytes is None:
@@ -216,6 +223,7 @@ def run_write(
     drive: int = 0,
     mode: str = "standard",
     greedy_source: str | None = None,
+    target_barcode: str | None = None,
     project_name: str | None = None,
     source_machine: str | None = None,
     backup_category: str = "project_archive",
@@ -244,7 +252,8 @@ def run_write(
         raise WriteError(f"no archivable content found under {root}")
 
     writable, scratch = _tape_views(db, greedy=greedy, greedy_source=greedy_source)
-    allocator = TapeAllocator(writable, scratch, greedy=greedy, greedy_source=greedy_source)
+    allocator = TapeAllocator(writable, scratch, greedy=greedy, greedy_source=greedy_source,
+                              target_barcode=target_barcode.strip() if target_barcode else None)
     try:
         alloc = allocator.allocate(units)
     except AllocationError as exc:
