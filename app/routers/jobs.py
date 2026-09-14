@@ -181,7 +181,10 @@ def job_detail(job_id: int, request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="unknown job")
     partial = request.query_params.get("partial") == "1"
     template = "job_progress_partial.html" if partial else "job_detail.html"
-    return templates.TemplateResponse(request, template, {"job": job})
+    # show_actions: both the full page and its own polling partial are the
+    # standalone job page, so both show Cancel/Retry — restore_detail.html
+    # embeds this same partial without setting it, so it stays hidden there.
+    return templates.TemplateResponse(request, template, {"job": job, "show_actions": True})
 
 
 @router.post("/{job_id}/cancel")
