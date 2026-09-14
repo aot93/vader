@@ -86,8 +86,11 @@ class TapeHardware(abc.ABC):
     def unload(self, slot: int, drive: int) -> None: ...
 
     @abc.abstractmethod
-    def mkltfs(self, drive: int, barcode: str) -> None:
-        """Format the tape in ``drive`` for LTFS use (``mkltfs``)."""
+    def mkltfs(self, drive: int, barcode: str, *, force: bool = False) -> None:
+        """Format the tape in ``drive`` for LTFS use (``mkltfs``). ``force``
+        must reach the real tool's own ``-f``/``--force`` flag — mkltfs
+        refuses outright on a medium that already carries an LTFS filesystem,
+        which is the normal state of any real cartridge being repurposed."""
 
     @abc.abstractmethod
     def mount_ltfs(self, drive: int, *, read_only: bool = False) -> Path:

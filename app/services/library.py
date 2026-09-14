@@ -174,7 +174,13 @@ def format_tape(db: Session, drive: int, barcode: str, *, force: bool = False,
     event = log_event(db, event_type=TapeEventType.format, tape_id=tape.id if tape else None,
                       drive_number=drive, initiated_by=initiated_by, job_id=job_id)
     try:
-        hw.mkltfs(drive, barcode)
+        # ``force`` here has already done its job as the catalog-status guard
+        # above — separately, mkltfs itself always refuses on real hardware
+        # when the medium already carries an LTFS filesystem, which is the
+        # normal state of any real cartridge being (re)formatted, scratch or
+        # not. That physical refusal must always be forced past here, or an
+        # ordinary "format this scratch tape" action fails on real hardware.
+        hw.mkltfs(drive, barcode, force=True)
         if tape:
             tape.status = TapeStatus.scratch
             tape.used_bytes = 0

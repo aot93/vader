@@ -136,13 +136,20 @@ class SimulatedHardware(TapeHardware):
         dr["activity"] = "idle"
         self._save()
 
-    def mkltfs(self, drive: int, barcode: str) -> None:
+    def mkltfs(self, drive: int, barcode: str, *, force: bool = False) -> None:
         dr = self._drive(drive)
         if dr["loaded_barcode"] != barcode:
             raise HardwareError(
                 f"drive {drive} holds {dr['loaded_barcode']}, refusing to format {barcode}"
             )
         vol = self._volume_dir(barcode)
+        # Mirror real mkltfs: it refuses outright on a medium that already
+        # carries an LTFS filesystem unless told to force past that — the
+        # normal state of any real tape being (re)formatted for reuse.
+        if vol.exists() and not force:
+            raise HardwareError(
+                f"tape {barcode} is already LTFS-formatted — refusing without force"
+            )
         if vol.exists():
             shutil.rmtree(vol)
         vol.mkdir(parents=True)

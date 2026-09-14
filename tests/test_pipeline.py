@@ -341,6 +341,29 @@ def test_verify_flags_corruption_and_logs_read_error(seeded, make_source):
     assert db.query(ReadError).count() >= 0  # read-error table exists and is wired
 
 
+def test_write_reuses_a_scratch_tape_that_already_carries_an_ltfs_filesystem(seeded, make_source):
+    """A "scratch" tape is, by definition, one that may already have been
+    formatted before — real mkltfs refuses outright on such a medium unless
+    forced. Simulate that prior life by formatting the tape once up front,
+    then confirm a write job can still claim it as scratch and reuse it."""
+    db = seeded
+    tape = db.scalars(select(Tape).where(Tape.status == TapeStatus.scratch)).first()
+    barcode = tape.barcode
+
+    job = _run(db, JobType.batch_format, {"barcodes": [barcode]})
+    assert job.status == JobStatus.completed, job.error
+    db.expire_all()
+    tape = db.scalar(select(Tape).where(Tape.barcode == barcode))
+    assert tape.status == TapeStatus.scratch  # still scratch, just pre-formatted now
+
+    src = make_source()
+    job = _run(db, JobType.write, {
+        "source_path": str(src), "mode": "standard", "target_barcode": barcode,
+    })
+    assert job.status == JobStatus.completed, job.error
+    assert job.result["tapes"] == [barcode]
+
+
 def test_batch_format_cycles_tapes_through_free_drives(seeded):
     from app.hardware import get_hardware
 

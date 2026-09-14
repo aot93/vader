@@ -135,7 +135,13 @@ def run_batch_format(
                             drive_number=drive_number, initiated_by=initiated_by, job_id=job_id,
                         )
                         try:
-                            get_hardware().mkltfs(drive_number, barcode)
+                            # Always force at the hardware layer: mkltfs refuses
+                            # outright on a medium that already carries an LTFS
+                            # filesystem, which is the normal state of any real
+                            # tape reaching this point (that's what "format" means
+                            # here) — the app-level scratch/force guard above is
+                            # the only gate that should ever block this call.
+                            get_hardware().mkltfs(drive_number, barcode, force=True)
                         except HardwareError as exc:
                             lib.finish_event(s, event, EventResult.error, str(exc))
                             raise

@@ -87,7 +87,11 @@ class _Drive:
         self.db.commit()
         self.loaded_barcode = barcode
         if needs_format and barcode not in self._formatted:
-            self.hw.mkltfs(self.n, barcode)
+            # A "scratch" tape is, by definition, one that may already carry
+            # an old LTFS filesystem from a prior life (that's what makes it
+            # reusable) — mkltfs refuses outright on real hardware unless
+            # told to force past that, so this must always force.
+            self.hw.mkltfs(self.n, barcode, force=True)
             self._formatted.add(barcode)
         self.mount = self.hw.mount_ltfs(self.n)
         return self.mount
@@ -109,9 +113,18 @@ class _Drive:
         self.mount = None
 
 
+def _default_capacity_bytes(settings) -> int:
+    # The simulator's knob is deliberately 1000x smaller than a real cartridge
+    # so spanning is fast to exercise in tests — it must never leak into a
+    # real-hardware capacity guess (see app.config.Settings.default_tape_capacity_bytes).
+    if settings.hardware_backend == "real":
+        return settings.default_tape_capacity_bytes
+    return settings.sim_tape_capacity_bytes
+
+
 def _tape_views(db: Session, *, greedy: bool, greedy_source: str | None) -> tuple[list[TapeView], list[TapeView]]:
     settings = get_settings()
-    default_cap = settings.sim_tape_capacity_bytes
+    default_cap = _default_capacity_bytes(settings)
     # Only offer tapes the changer can actually see right now — a catalog row
     # can outlive the tape's physical presence (moved by hand, dropped from a
     # reseeded/reset library), and picking one blows up mid-job instead of at
@@ -506,7 +519,7 @@ def _finalise_tape(db: Session, tape_id: int) -> None:
         tape.first_written_at = now
     tape.last_written_at = now
     tape.write_pass_count = (tape.write_pass_count or 0) + 1
-    cap = tape.capacity_native_bytes or get_settings().sim_tape_capacity_bytes
+    cap = tape.capacity_native_bytes or _default_capacity_bytes(get_settings())
     # "full" once under 2% headroom remains
     tape.status = TapeStatus.full if (cap - total) < cap * 0.02 else TapeStatus.active
     db.flush()

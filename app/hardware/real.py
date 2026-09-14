@@ -111,9 +111,12 @@ class RealHardware(TapeHardware):
     def unload(self, slot: int, drive: int) -> None:
         self._run(["mtx", "-f", self.changer, "unload", str(slot), str(drive)], timeout=600)
 
-    def mkltfs(self, drive: int, barcode: str) -> None:
+    def mkltfs(self, drive: int, barcode: str, *, force: bool = False) -> None:
         dev = self._drive_device(drive)
-        self._run(["mkltfs", "-d", dev, "-n", barcode], timeout=7200)
+        argv = ["mkltfs", "-d", dev, "-n", barcode]
+        if force:
+            argv.append("-f")
+        self._run(argv, timeout=7200)
 
     def mount_ltfs(self, drive: int, *, read_only: bool = False) -> Path:
         dev = self._drive_device(drive)

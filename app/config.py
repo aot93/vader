@@ -58,9 +58,13 @@ class Settings:
     database_url: str = os.environ.get("DATABASE_URL", "sqlite:///./data/vader.sqlite3")
 
     hardware_backend: str = os.environ.get("HARDWARE_BACKEND", "simulator")
+    # changer_device and every entry in drive_devices must be a SCSI-generic
+    # (/dev/sg*) node, not a /dev/nst*//dev/st* (st-driver) node -- mkltfs/ltfs
+    # issue raw SG_IO ioctls that only /dev/sg* supports. Get the mapping from
+    # `lsscsi -g` (by device, not by index order).
     changer_device: str = os.environ.get("CHANGER_DEVICE", "/dev/sg3")
     drive_devices: list[str] = field(
-        default_factory=lambda: _list("DRIVE_DEVICES", ["/dev/nst0", "/dev/nst1"])
+        default_factory=lambda: _list("DRIVE_DEVICES", ["/dev/sg1", "/dev/sg2"])
     )
     ltfs_mount_base: str = os.environ.get("LTFS_MOUNT_BASE", "/mnt/ltfs")
 
@@ -68,6 +72,14 @@ class Settings:
     sim_drives: int = _int("SIM_DRIVES", 2)
     sim_tape_capacity_bytes: int = _int("SIM_TAPE_CAPACITY_BYTES", 12_000_000_000)
     sim_seed_tapes: bool = _bool("SIM_SEED_TAPES", True)
+
+    # Assumed native capacity for a real tape that has never had a capacity
+    # explicitly set on the Tapes page (e.g. one just auto-registered from a
+    # library scan) — LTO-8 (12 TB) by default; override per the cartridges
+    # actually in use. Only consulted when HARDWARE_BACKEND=real — the
+    # simulator always uses SIM_TAPE_CAPACITY_BYTES instead, which is this
+    # same number scaled down 1000x so spanning is fast to exercise in tests.
+    default_tape_capacity_bytes: int = _int("DEFAULT_TAPE_CAPACITY_BYTES", 12_000_000_000_000)
 
     data_dir: Path = Path(os.environ.get("DATA_DIR", "./data")).resolve()
     backup_dir: Path = Path(os.environ.get("BACKUP_DIR", "./data/backups")).resolve()
