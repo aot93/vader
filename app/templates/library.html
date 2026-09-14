@@ -3,7 +3,7 @@
 {% block body %}
 <h1>Library &amp; Drive Control</h1>
 <p class="muted">Backend: <code>{{ hw_backend }}</code> —
-  <form class="inline" method="post" action="/library/inventory"><button class="ghost">Refresh inventory</button></form>
+  <form class="inline" method="post" action="/library/inventory"><button class="ghost" data-busy-text="Scanning library…">Refresh inventory</button></form>
 </p>
 
 {% if not state %}
@@ -24,7 +24,7 @@
         <label>Return to slot</label>
         <div class="row">
           <div><input type="number" name="slot" value="{{ d.loaded_from_slot or '' }}" required></div>
-          <div><button>Unload</button></div>
+          <div><button data-busy-text="Unloading…">Unload</button></div>
         </div>
       </form>
     {% else %}
@@ -33,7 +33,7 @@
         <label>Load from slot</label>
         <div class="row">
           <div><input type="number" name="slot" required></div>
-          <div><button>Load</button></div>
+          <div><button data-busy-text="Loading…">Load</button></div>
         </div>
       </form>
     {% endif %}
@@ -85,7 +85,7 @@
     <form method="post" action="/library/clean">
       <label>Drive</label><input type="number" name="drive" value="0" required>
       <label>Cleaning cartridge slot</label><input type="number" name="cleaning_slot" required>
-      <p><button class="danger">Run cleaning cycle</button></p>
+      <p><button class="danger" data-busy-text="Cleaning…">Run cleaning cycle</button></p>
     </form>
   </div>
   <div class="panel">

@@ -35,5 +35,22 @@
 <footer class="muted">
   Vader · internal tape-archive control · once-a-year tool, permanent catalog
 </footer>
+
+<script>
+  // Robotic-arm/tape actions (load, unload, inventory scan, clean) can take
+  // anywhere from seconds to several minutes with no feedback otherwise —
+  // the page just sits there until the full-page POST response comes back,
+  // which reads as "did my click even register?" Disable the button and
+  // show it's working the instant a form is submitted. Set data-busy-text
+  // on a <button> for a specific message; otherwise falls back to "Working…".
+  document.addEventListener("submit", (event) => {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    form.querySelectorAll("button").forEach((btn) => {
+      btn.disabled = true;
+      btn.textContent = btn.dataset.busyText || "Working…";
+    });
+  });
+</script>
 </body>
 </html>
