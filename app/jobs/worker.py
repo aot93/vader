@@ -56,14 +56,18 @@ class JobWorker(threading.Thread):
 
     def __init__(self) -> None:
         super().__init__(name="vader-job-worker")
-        self._stop = threading.Event()
+        # Named _stop_event, not _stop — threading.Thread has its own private
+        # _stop() method it calls internally during shutdown; shadowing it
+        # with an Event crashes that cleanup with 'Event' object is not
+        # callable, which breaks graceful shutdown on every restart.
+        self._stop_event = threading.Event()
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stop_event.set()
 
     def run(self) -> None:
         self._recover_interrupted()
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             claimed = self._claim_next()
             if claimed is None:
                 time.sleep(_POLL_SECONDS)

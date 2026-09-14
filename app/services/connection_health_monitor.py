@@ -21,20 +21,24 @@ class ConnectionHealthMonitor(threading.Thread):
 
     def __init__(self) -> None:
         super().__init__(name="vader-connection-health")
-        self._stop = threading.Event()
+        # Named _stop_event, not _stop — threading.Thread has its own private
+        # _stop() method it calls internally during shutdown; shadowing it
+        # with an Event crashes that cleanup with 'Event' object is not
+        # callable (see app.jobs.worker.JobWorker for the same fix).
+        self._stop_event = threading.Event()
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stop_event.set()
 
     def run(self) -> None:
         interval = max(30, get_settings().smb_health_interval_seconds)
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             try:
                 with session_scope() as db:
                     check_all_connections(db)
             except Exception:  # noqa: BLE001 - a bad sweep must not kill the thread
                 pass
-            self._stop.wait(interval)
+            self._stop_event.wait(interval)
 
 
 _monitor: ConnectionHealthMonitor | None = None
