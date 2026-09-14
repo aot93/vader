@@ -100,8 +100,32 @@ class SystemdMountBackend(MountBackend):
             Path(spec.mount_path).rmdir()
 
     def check_health(self, spec: ConnectionSpec) -> tuple[bool, str | None]:
+        # A plain, never-mounted directory (created by provision()'s mkdir)
+        # lists successfully and even satisfies os.path.ismount() once the
+        # automount unit is enabled — the automount trigger itself is a mount
+        # (autofs) from the moment it's enabled, regardless of whether the
+        # underlying CIFS connection ever actually comes up. So neither
+        # listdir() nor ismount() alone can tell "mounted" from "not mounted".
+        # listdir() first (to trigger the automount if it hasn't fired yet),
+        # then confirm against /proc/mounts that the mount at this exact path
+        # really is a cifs filesystem, not just an idle/failed autofs stub.
         try:
             os.listdir(spec.mount_path)
-            return True, None
         except OSError as exc:
             return False, str(exc)
+        if not _is_cifs_mounted(spec.mount_path):
+            return False, f"{spec.mount_path} is not an active CIFS mount"
+        return True, None
+
+
+def _is_cifs_mounted(mount_path: str, mounts_file: str = "/proc/mounts") -> bool:
+    target = str(Path(mount_path).resolve())
+    try:
+        with open(mounts_file) as f:
+            for line in f:
+                fields = line.split()
+                if len(fields) >= 3 and fields[1] == target and fields[2] == "cifs":
+                    return True
+    except OSError:
+        return False
+    return False
