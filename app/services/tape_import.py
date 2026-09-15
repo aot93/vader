@@ -329,6 +329,7 @@ def run_tape_import(
     backup_category: str = "project_archive",
     initiated_by: str = "operator",
     verify: bool = True,
+    claimed_drives: frozenset[int] | None = None,
     progress: ProgressCb | None = None,
     is_cancelled: CancelCb | None = None,
 ) -> dict:
@@ -349,7 +350,17 @@ def run_tape_import(
     if blocked:
         raise TapeImportError("refusing to import onto damaged/retired tapes: " + ", ".join(blocked))
 
-    drives = _free_drives()[: len(barcodes)]
+    # See the matching comment in app.services.batch_format.run_batch_format:
+    # when run through the job worker, claimed_drives is exactly what the
+    # drive-reservation registry already reserved for this job and must be
+    # used as-is — physical state alone can't distinguish "free" from
+    # "reserved for a different concurrently-running job that hasn't loaded
+    # a tape onto it yet". Called directly (no worker, e.g. tests) still
+    # falls back to discovering free drives itself.
+    if claimed_drives is not None:
+        drives = sorted(claimed_drives)[: len(barcodes)]
+    else:
+        drives = _free_drives()[: len(barcodes)]
     if not drives:
         raise TapeImportError("no free drives available")
 

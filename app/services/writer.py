@@ -379,6 +379,15 @@ def _write_sequence_part(
     if existing and existing.written_at and (existing.verified_at or not readback):
         return existing  # idempotent skip
 
+    # Commit here, before the slow copy+hash loop below: _upsert_sequence's
+    # flush above left an uncommitted write pending, and SQLite allows only
+    # one writer at a time — holding that open through the copy/hash work
+    # would otherwise serialize this job against any other job trying to
+    # write anything at the same time, even one running on a completely
+    # different drive (confirmed live: two write jobs on different drives
+    # ran fully back-to-back, not concurrently, until this was added).
+    db.commit()
+
     frames = placement.frames or []
     seq_dir_rel = _ltfs_relpath(root, Path(unit.source_path))
     checksums: list[FrameChecksum] = []
@@ -460,6 +469,10 @@ def _write_file_part(
     )
     if existing and existing.written_at and (existing.verified_at or not readback):
         return existing
+
+    # See the matching comment in _write_sequence_part: release the write
+    # lock _upsert_item's flush left pending before the slow copy+hash work.
+    db.commit()
 
     src = unit.path or Path(unit.source_path)
     rel = _ltfs_relpath(root, src)

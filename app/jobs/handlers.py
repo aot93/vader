@@ -18,7 +18,10 @@ ProgressCb = Callable[[int, int, str], None]
 CancelCb = Callable[[], bool]
 
 
-def dispatch(db: Session, job: Job, progress: ProgressCb, is_cancelled: CancelCb) -> dict:
+def dispatch(
+    db: Session, job: Job, progress: ProgressCb, is_cancelled: CancelCb,
+    claimed_drives: frozenset[int] = frozenset(),
+) -> dict:
     params = dict(job.params or {})
 
     if job.job_type == JobType.write:
@@ -28,10 +31,16 @@ def dispatch(db: Session, job: Job, progress: ProgressCb, is_cancelled: CancelCb
         return run_verify(db, job_id=job.id, progress=progress, is_cancelled=is_cancelled, **params)
 
     if job.job_type == JobType.restore:
-        return run_restore(db, job_id=job.id, progress=progress, is_cancelled=is_cancelled, **params)
+        # restore has no `drive` param of its own (see app.jobs.drives.
+        # drive_need) — the worker auto-picks any one free drive via the
+        # claim registry and hands it in here.
+        drive = next(iter(claimed_drives), 0)
+        return run_restore(db, job_id=job.id, drive=drive, progress=progress,
+                           is_cancelled=is_cancelled, **params)
 
     if job.job_type == JobType.batch_format:
-        return run_batch_format(db, job_id=job.id, progress=progress, is_cancelled=is_cancelled, **params)
+        return run_batch_format(db, job_id=job.id, claimed_drives=claimed_drives,
+                                progress=progress, is_cancelled=is_cancelled, **params)
 
     if job.job_type == JobType.format:
         drive, barcode = params["drive"], params["barcode"]
@@ -44,7 +53,8 @@ def dispatch(db: Session, job: Job, progress: ProgressCb, is_cancelled: CancelCb
         return {"drive": drive, "barcode": barcode}
 
     if job.job_type == JobType.tape_import:
-        return run_tape_import(db, job_id=job.id, progress=progress, is_cancelled=is_cancelled, **params)
+        return run_tape_import(db, job_id=job.id, claimed_drives=claimed_drives,
+                               progress=progress, is_cancelled=is_cancelled, **params)
 
     if job.job_type == JobType.backup:
         progress(0, 1, "exporting full catalog CSV")

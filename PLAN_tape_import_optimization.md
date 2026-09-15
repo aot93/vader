@@ -5,10 +5,9 @@ Written during the `format-job-and-tape-targeting` debugging session; see
 history this grew out of (job #45, a full-tape import of `AB26001L`, ~17TB /
 375,423 files, is what surfaced all of this).
 
-**Status:** items 1, 2, and 5 are implemented (see item sections below).
-Items 3 and 4 are still just planned — item 3 needs its own follow-up plan
-(the DB session lifetime fix has to land first); item 4 was left aside since
-item 5 covers the same integrity-vs-speed tradeoff more explicitly.
+**Status:** items 1, 2, 3, and 5 are implemented (see item sections below).
+Item 4 was left aside since item 5 covers the same integrity-vs-speed
+tradeoff more explicitly.
 
 ## Background / findings
 
@@ -36,13 +35,13 @@ item 5 covers the same integrity-vs-speed tradeoff more explicitly.
   problem, not a hardware contention problem — the changer has 2 independent
   drives.
 
-- **Related, already deferred**: `_run_job()` holds one DB session/transaction
-  open for the entire job (including long blocking hardware/filesystem
-  work), confirmed via `pg_stat_activity` showing a connection "idle in
-  transaction" for the full duration of job #45. Tracked separately, not
-  part of this doc, but relevant to item 3 below — going concurrent without
-  fixing this first makes it worse (multiple long-lived idle transactions
-  stacking up against a small connection pool).
+- **Related, since fixed** (was "already deferred" — resolved as part of
+  landing item 3): `_run_job()` holding one DB session/transaction open for
+  the entire job, confirmed via `pg_stat_activity` showing a connection
+  "idle in transaction" for the full duration of job #45. Each of
+  `tape_import`, `run_verify`, `run_restore`, and `run_write` now commits
+  periodically (throttled, or right after the row-creating flush) instead
+  of holding one transaction across the whole job's slow work — see item 3.
 
 ## Optimization items, roughly in recommended order
 
@@ -81,7 +80,7 @@ in the leftovers loop's second pass). Covered by
 `tests/test_intake.py::test_scan_does_exactly_one_stat_per_file` (asserts
 the exact call count) plus symlink-skip and vanished-file regression tests.
 
-### 3. Concurrent job execution keyed by drive
+### 3. Concurrent job execution keyed by drive — ✅ done
 
 The real fix for "can a slow import block a write/restore" — yes, today,
 confirmed live. Since the two drives are physically independent, the worker
@@ -102,6 +101,83 @@ Biggest-impact item on the list, and also the biggest change:
 
 **Effort:** medium-large. **Risk:** medium (concurrency correctness).
 **Depends on:** the DB session lifetime fix.
+
+**Implemented**, as a sequence of small commits (mirroring items 1/2/5's
+cadence) rather than one large change — full detail in each commit message,
+summarized here:
+1. `SimulatedHardware` gained an internal `RLock` (must be reentrant —
+   `unload()`/`clean_drive()` call back into `load()`/`unmount_ltfs()` on
+   the same thread) around every method touching its shared in-memory
+   state, previously safe only because one worker thread serialized every
+   hardware call.
+2. The changer-arm lock, previously two *separate* `Lock()` objects in
+   `batch_format.py`/`tape_import.py` that never actually contended against
+   each other, was unified into one lock inside `app.services.library`'s
+   `load_tape`/`unload_tape`/`clean_drive` — which also, for free, gave
+   `write`/`verify`/`restore` arm locking they never had at all before.
+   Landing this exposed a real TOCTOU race: every caller resolved "any free
+   slot" for `unload_tape` *before* calling it, which used to be safe only
+   because that resolution happened inside the same caller-side lock — once
+   the lock moved inside `unload_tape` itself, two drives unloading at once
+   could both see the same slot as free. Fixed by resolving "any free slot"
+   *inside* `unload_tape` (`slot=None`), atomically, under its own lock.
+3. `run_verify`'s per-check loop got the same commit-before-progress fix
+   already applied to `tape_import` (item 1).
+4. `run_restore`'s per-file loop got the analogous fix — no deadlock to
+   reproduce under SQLite here specifically (`_restore_one` never writes to
+   the DB), but it still bounds how long the session's transaction/snapshot
+   stays open, which is what actually matters once jobs run concurrently
+   against a shared connection pool.
+5. `app/jobs/drives.py`: the in-process drive-reservation registry —
+   `drive_need(job)` maps each JobType to `ExactDrives` (write/verify/
+   format, from `job.params["drive"]`), `AnyDrives` (restore: auto-picks
+   one free drive, since restore never had a drive param at all before;
+   batch_format/tape_import: up to as many drives as barcodes), or
+   `NoDrive` (backup). Every claim reconciles against the *physical*
+   hardware state, not just its own bookkeeping.
+6. `JobWorker` restructured: each poll tick scans *every* queued job and
+   starts whichever ones are currently claimable, each in its own thread,
+   instead of claiming and running exactly one job at a time.
+   `run_pending_jobs_inline()` (the test/CLI helper) rewritten to match —
+   alternates "start everything startable" with "wait for something to
+   finish" until the queue and in-flight set are both empty.
+
+   Two more real bugs surfaced only once actual concurrent execution was
+   exercised (both caught by tests before landing, not after):
+   - `_scan_and_start()`'s first draft started each job's thread *while
+     still holding that job's own claim-and-flip transaction open* —
+     the same deadlock shape fixed in items 1–4, newly possible here since
+     starting a thread now happens mid-scan instead of after a single claim.
+     Fixed by giving each job's claim its own short transaction, committed
+     before that job's thread starts.
+   - `run_write`'s per-placement DB write (`_upsert_sequence`/`_upsert_item`
+     flushing, then holding that transaction open through the whole
+     copy+hash loop) meant two write jobs on *different* drives still ran
+     fully serially on SQLite's single-writer lock — confirmed live with a
+     concurrency-probing test before fixing it the same way as items 1–4:
+     commit right after the flush, before the slow work begins.
+   - `batch_format`/`tape_import` discover their own drives internally via
+     `_free_drives()` (physical hardware state) — which can't tell "free"
+     from "reserved by a different concurrently-running job that hasn't
+     loaded a tape onto it yet". A batch_format job given drive 1 by the
+     registry would still see drive 0 as physically free (if the other job
+     hadn't loaded onto it yet) and grab that instead — a real hardware
+     conflict, not just a test artifact. Fixed by threading the registry's
+     actual claimed set into both functions (`claimed_drives` param, used
+     when the call came through the worker; falls back to the old
+     `_free_drives()` discovery for direct/test callers).
+
+   Fairness/starvation for the scan-all-queued model is an accepted,
+   undefended tradeoff at this app's scale (two drives, one operator) —
+   not engineered around.
+
+Tests: `tests/test_hardware_simulator.py`, `tests/test_library_arm_lock.py`,
+the incremental-commit tests added to `test_pipeline.py`/`test_tape_import.py`,
+`tests/test_jobs_drives.py`, and `tests/test_jobs_worker.py` (concurrency
+proven via a shared-counter probe wrapping a slowed-down step, not
+wall-clock timing — asserts genuine overlap for different-drive jobs and
+zero overlap for same-drive/arm-lock cases). Full suite stress-run 15x
+consecutively with no flakes before landing.
 
 ### 4. Policy lever: full-hash vs. sampled verify on import
 
