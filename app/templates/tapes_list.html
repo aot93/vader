@@ -12,7 +12,7 @@
 <table>
   <tr>
     <th>Barcode</th><th>Gen</th><th>Status</th><th>Used / Capacity</th>
-    <th>Spans</th><th>Location</th><th>Last written</th><th>Last verified</th><th>Passes</th>
+    <th>Spans</th><th>Location</th><th>Last written</th><th>Audit</th><th>Passes</th>
   </tr>
   {% for t in tapes %}
   <tr>
@@ -28,7 +28,17 @@
     <td>{{ span_counts.get(t.id, 0) }}</td>
     <td>{{ t.physical_location or '—' }}</td>
     <td class="tag">{{ t.last_written_at | dt }}</td>
-    <td class="tag">{{ t.last_verified_at | dt }}</td>
+    <td class="tag">
+      {# "Verified" wins even if a later fast scan touched the tape too — it's
+         still fully hash-audited content, just also relisted since. #}
+      {% if t.last_verified_at %}
+        <span class="pill success">verified</span> {{ t.last_verified_at | timeago }}
+      {% elif t.last_scanned_at %}
+        <span class="pill pending">scanned only</span> {{ t.last_scanned_at | timeago }}
+      {% else %}
+        <span class="pill unknown">never audited</span>
+      {% endif %}
+    </td>
     <td>{{ t.write_pass_count }}</td>
   </tr>
   {% else %}

@@ -1,10 +1,14 @@
 # Plan — tape_import / job-worker performance & fast-scan
 
-Planning document only — nothing here is implemented yet. Written during the
-`format-job-and-tape-targeting` debugging session; see
+Written during the `format-job-and-tape-targeting` debugging session; see
 `SESSION_NOTES_tape_and_connections.md` for the connection/tape bug-fix
 history this grew out of (job #45, a full-tape import of `AB26001L`, ~17TB /
 375,423 files, is what surfaced all of this).
+
+**Status:** items 1, 2, and 5 are implemented (see item sections below).
+Items 3 and 4 are still just planned — item 3 needs its own follow-up plan
+(the DB session lifetime fix has to land first); item 4 was left aside since
+item 5 covers the same integrity-vs-speed tradeoff more explicitly.
 
 ## Background / findings
 
@@ -42,7 +46,7 @@ history this grew out of (job #45, a full-tape import of `AB26001L`, ~17TB /
 
 ## Optimization items, roughly in recommended order
 
-### 1. Progress reporting during scan+hash (cheap, do first)
+### 1. Progress reporting during scan+hash (cheap, do first) — ✅ done
 
 No `progress()` call happens between "mounting" and "unloading" in
 `_import_one_tape` — a multi-hour job looks completely frozen in the UI the
@@ -51,7 +55,15 @@ change total runtime, but fixes the "is this stuck?" question for free.
 
 **Effort:** small. **Risk:** low. **Depends on:** nothing.
 
-### 2. Cut redundant stat calls in `scan_source`
+**Implemented:** `_import_one_tape` now emits a progress update every ~5s
+(or on the last unit) while scanning+hashing. Found and fixed a real bug
+along the way: the progress callback opens its own DB session to write the
+`Job` row, which deadlocked against the tape's own still-open catalog
+transaction on SQLite (single-writer lock) — fixed by committing that
+transaction right before invoking the callback. Covered by
+`tests/test_tape_import.py::test_import_reports_intra_tape_scan_progress`.
+
+### 2. Cut redundant stat calls in `scan_source` — ✅ done
 
 `app/services/intake.py`'s per-file loop calls `fpath.is_file()`,
 `fpath.is_symlink()`, and `fpath.stat()` — three separate FUSE round-trips
@@ -62,6 +74,12 @@ its own, but directly relevant to item 5 (fast scan) since that mode's
 *entire* cost becomes this walk.
 
 **Effort:** small. **Risk:** low. **Depends on:** nothing.
+
+**Implemented:** one `os.lstat()` per file now, reused for is-regular /
+is-symlink / size everywhere (some files used to cost up to 5 round-trips,
+in the leftovers loop's second pass). Covered by
+`tests/test_intake.py::test_scan_does_exactly_one_stat_per_file` (asserts
+the exact call count) plus symlink-skip and vanished-file regression tests.
 
 ### 3. Concurrent job execution keyed by drive
 
@@ -100,7 +118,7 @@ as "not yet audited" rather than "sample-verified").
 **Effort:** small-medium. **Risk:** low (it's opt-in). **Depends on:**
 deciding whether item 5 replaces the need for this.
 
-### 5. Fast-scan mode: list files/folders + capacity, no hashing
+### 5. Fast-scan mode: list files/folders + capacity, no hashing — ✅ done
 
 New idea from this session. A `tape_import` mode that walks the tape
 (`scan_source()`, same as today) and records catalog entries **without**
@@ -139,14 +157,36 @@ list, could be built independently and first if desired — it doesn't touch
 the job-worker concurrency model at all, just what one `tape_import` run
 does.
 
+**Implemented:** `run_tape_import(..., verify: bool = True)`, threaded
+through `_import_one_tape`/`_import_sequence`/`_import_file` — `verify=False`
+skips all `sha256_file()` calls, and spans/containers from that pass keep
+`verified_at=None`. `Tape.last_scanned_at` (migration `bfc167b72cb8`) is set
+on every import; `last_verified_at` only on a full (hashing) pass, so the
+Tapes list/detail pages can show "verified" vs "scanned only" vs "never
+audited". `_measure_capacity_bytes()` corrects `capacity_native_bytes` from
+`os.statvfs(mount)` — gated to `HARDWARE_BACKEND=real` only, since the
+simulator's "mount" is a plain host directory and `statvfs()` on it would
+report the *host's* free space, not a tape's. UI: a Mode selector (Full
+import + verify / Fast scan) on the tape_import form. Covered by
+`tests/test_tape_import.py` (`test_fast_scan_lists_content_without_hashing_it`,
+`test_a_later_full_import_hashes_content_a_fast_scan_only_listed`,
+`test_import_never_overwrites_capacity_in_simulator_mode`,
+`test_measure_capacity_bytes_only_applies_on_real_hardware`).
+
 ## Open questions before implementing
 
-1. Item 5's data-model gap — is `last_scanned_at` the right shape, or would
+(Resolved for items 1/2/5 above — `last_scanned_at` was the chosen shape,
+and item 5 shipped independently of item 3. Still open for item 3/4:)
+
+1. ~~Item 5's data-model gap — is `last_scanned_at` the right shape, or would
    you rather model "audit-worthiness" more explicitly (e.g. a computed
-   status like `scanned` / `verified` / `stale`)?
-2. Item 3 (concurrency) is the biggest lift — worth scoping as its own
+   status like `scanned` / `verified` / `stale`)?~~ Resolved: plain
+   `last_scanned_at` column, shipped.
+2. ~~Item 3 (concurrency) is the biggest lift — worth scoping as its own
    follow-up plan once the DB session fix lands, rather than bundling into
-   this pass?
-3. Priority order: is unblocking write/restore from long imports (item 3) or
+   this pass?~~ Resolved: yes, own follow-up plan when picked up.
+3. ~~Priority order: is unblocking write/restore from long imports (item 3) or
    shipping the fast-scan/triage feature (item 5) the more urgent of the two
-   bigger items?
+   bigger items?~~ Resolved: item 5 first, shipped. Item 3 (and whether
+   item 4 is still worth doing on its own) remain open for whenever this is
+   picked back up.

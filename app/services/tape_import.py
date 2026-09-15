@@ -28,9 +28,21 @@ under the same unit_key rather than reconstructing the original split.
 Like batch_format, the arm (load/unload) is serialised across drives with
 _arm_lock while each drive's mount/scan/catalog work runs concurrently — that
 part is what's worth parallelising, since reading a whole LTO tape is slow.
+
+Two modes (``verify`` flag on :func:`run_tape_import`): the default full
+import reads and SHA256-hashes every file, the same trust anchor as any
+other content this app has never seen before. A "fast scan" (``verify=
+False``) walks the tape and records what's there — size, path, count — without
+reading file content at all, so it costs roughly what listing costs (seconds
+to minutes) instead of what reading the whole tape costs (hours). Fast-scanned
+entries get ``verified_at=None``; the existing idempotent-skip check already
+only skips *verified* spans, so a later full import naturally re-processes
+anything a fast scan only listed. ``Tape.last_scanned_at`` vs
+``last_verified_at`` is how the catalog tells "listed" from "trusted" apart.
 """
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import time
@@ -122,6 +134,22 @@ def _register_archived(db: Session, barcode: str) -> int:
     return tape.id
 
 
+def _measure_capacity_bytes(mount: Path) -> int | None:
+    """Best-effort measured capacity for this specific cartridge, read
+    straight off the mounted LTFS filesystem. Real cartridges vary
+    tape-to-tape (format overhead, partial writes prior to this app), so this
+    is more accurate than the configured default — but only on real
+    hardware: the simulator's "mount" is a plain directory on the host disk,
+    so statvfs() on it would report the *host's* free space, not a tape's."""
+    if get_settings().hardware_backend != "real":
+        return None
+    try:
+        vfs = os.statvfs(mount)
+    except OSError:
+        return None
+    return vfs.f_blocks * vfs.f_frsize
+
+
 def _rewrite_identity(mount: Path, barcode: str, units: list[SequenceUnit | FileUnit]) -> dict[int, str]:
     """Scope each unit's catalog identity to this physical tape. Returns
     ``id(unit) -> ltfs-relative path`` (the real on-tape location) since the
@@ -135,28 +163,34 @@ def _rewrite_identity(mount: Path, barcode: str, units: list[SequenceUnit | File
 
 
 def _import_sequence(db: Session, unit: SequenceUnit, *, ltfs_path: str,
-                     barcode: str, tape_id: int) -> ContentTapeSpan | None:
+                     barcode: str, tape_id: int, verify: bool) -> ContentTapeSpan | None:
     container = _upsert_sequence(db, unit)
     existing = _existing_span(db, seq_id=container.id, item_id=None, tape_id=tape_id, part_index=0)
     if existing and existing.verified_at:
-        return None  # idempotent skip — already imported from this tape
+        return None  # idempotent skip — already imported (and verified) from this tape
 
-    checksums = [
-        FrameChecksum(filename=fr.filename, frame=fr.frame, size=fr.size, sha256=sha256_file(fr.path))
-        for fr in unit.sorted_frames
-    ]
-    man_rel = manifest_relpath(unit.project_name, unit.sequence_name, unit.shot_name or "shot")
-    man_doc = build_manifest_document(
-        project_name=unit.project_name, sequence_name=unit.sequence_name,
-        shot_name=unit.shot_name, source_path=unit.source_path,
-        ltfs_dir=ltfs_path, frames=checksums,
-    )
-    man_path = get_settings().data_dir / "manifests" / "imported" / barcode / man_rel
-    man_sha = write_manifest(man_path, man_doc)
+    man_sha: str | None = None
+    verified_at: datetime | None = None
+    if verify:
+        checksums = [
+            FrameChecksum(filename=fr.filename, frame=fr.frame, size=fr.size, sha256=sha256_file(fr.path))
+            for fr in unit.sorted_frames
+        ]
+        man_rel = manifest_relpath(unit.project_name, unit.sequence_name, unit.shot_name or "shot")
+        man_doc = build_manifest_document(
+            project_name=unit.project_name, sequence_name=unit.sequence_name,
+            shot_name=unit.shot_name, source_path=unit.source_path,
+            ltfs_dir=ltfs_path, frames=checksums,
+        )
+        man_path = get_settings().data_dir / "manifests" / "imported" / barcode / man_rel
+        man_sha = write_manifest(man_path, man_doc)
 
-    container.manifest_ref = str(man_path)
-    container.manifest_sha256 = man_sha
-    container.verified_at = _now()  # we just read + hashed every frame
+        container.manifest_ref = str(man_path)
+        container.manifest_sha256 = man_sha
+        verified_at = _now()
+        container.verified_at = verified_at  # we just read + hashed every frame
+    # else: fast scan — leave container.manifest_ref/verified_at as they were
+    # (unset, or whatever an earlier full import already recorded).
 
     span = existing or ContentTapeSpan(sequence_container_id=container.id)
     span.tape_id = tape_id
@@ -165,23 +199,27 @@ def _import_sequence(db: Session, unit: SequenceUnit, *, ltfs_path: str,
     span.part_count = 1
     span.size_bytes = unit.total_size_bytes
     span.sha256 = man_sha
-    span.verified_at = _now()
+    span.verified_at = verified_at
     if span.id is None:
         db.add(span)
     db.flush()
     return span
 
 
-def _import_file(db: Session, unit: FileUnit, *, ltfs_path: str, tape_id: int) -> ContentTapeSpan | None:
+def _import_file(db: Session, unit: FileUnit, *, ltfs_path: str, tape_id: int, verify: bool) -> ContentTapeSpan | None:
     item = _upsert_item(db, unit)
     existing = _existing_span(db, seq_id=None, item_id=item.id, tape_id=tape_id, part_index=0)
     if existing and existing.verified_at:
         return None
 
-    src = unit.path or Path(unit.source_path)
-    digest = sha256_file(src)
-    item.sha256 = digest
-    item.verified_at = _now()
+    digest: str | None = None
+    verified_at: datetime | None = None
+    if verify:
+        src = unit.path or Path(unit.source_path)
+        digest = sha256_file(src)
+        item.sha256 = digest
+        verified_at = _now()
+        item.verified_at = verified_at
 
     span = existing or ContentTapeSpan(content_item_id=item.id)
     span.tape_id = tape_id
@@ -190,7 +228,7 @@ def _import_file(db: Session, unit: FileUnit, *, ltfs_path: str, tape_id: int) -
     span.part_count = 1
     span.size_bytes = unit.size
     span.sha256 = digest
-    span.verified_at = _now()
+    span.verified_at = verified_at
     if span.id is None:
         db.add(span)
     db.flush()
@@ -200,7 +238,7 @@ def _import_file(db: Session, unit: FileUnit, *, ltfs_path: str, tape_id: int) -
 def _import_one_tape(
     hw, barcode: str, drive_number: int, *, tape_id: int, job_id: int, initiated_by: str,
     project_name: str | None, source_machine: str | None, cat: BackupCategory,
-    progress: ProgressCb, done: int, total: int,
+    progress: ProgressCb, done: int, total: int, verify: bool = True,
 ) -> int:
     """Mount ``barcode`` (already loaded in ``drive_number``) read-only, scan
     and catalog it, then unmount. Returns the number of units imported.
@@ -209,6 +247,9 @@ def _import_one_tape(
     callback and its current tape-level counters — ``done``/``total`` don't
     change while this tape is being processed, only the message does, so a
     long single-tape scan+hash no longer looks frozen in the UI.
+
+    ``verify=False`` is the fast-scan mode: list what's on the tape without
+    reading/hashing any file content.
     """
     mount = hw.mount_ltfs(drive_number, read_only=True)
     try:
@@ -218,11 +259,13 @@ def _import_one_tape(
         except FileNotFoundError:
             units = []
         ltfs_paths = _rewrite_identity(mount, barcode, units)
+        measured_capacity_bytes = _measure_capacity_bytes(mount)
 
         n_units = 0
         total_bytes = 0
         n_total_units = len(units)
         last_progress = time.monotonic()
+        verb = "scanned" if verify else "scanned (fast, no hash)"
         with session_scope() as s:
             event = lib.log_event(
                 s, event_type=TapeEventType.import_tape, tape_id=tape_id,
@@ -232,9 +275,10 @@ def _import_one_tape(
                 for i, unit in enumerate(units, start=1):
                     path = ltfs_paths[id(unit)]
                     if isinstance(unit, SequenceUnit):
-                        span = _import_sequence(s, unit, ltfs_path=path, barcode=barcode, tape_id=tape_id)
+                        span = _import_sequence(s, unit, ltfs_path=path, barcode=barcode,
+                                                tape_id=tape_id, verify=verify)
                     else:
-                        span = _import_file(s, unit, ltfs_path=path, tape_id=tape_id)
+                        span = _import_file(s, unit, ltfs_path=path, tape_id=tape_id, verify=verify)
                     if span:
                         n_units += 1
                         total_bytes += span.size_bytes or 0
@@ -251,8 +295,8 @@ def _import_one_tape(
                         # `event` below) stay usable after this commit.
                         s.commit()
                         progress(done, total,
-                                 f"drive {drive_number}: {barcode} — scanned {i}/{n_total_units} "
-                                 f"units, hashed {format_bytes(total_bytes)}")
+                                 f"drive {drive_number}: {barcode} — {verb} {i}/{n_total_units} "
+                                 f"units ({format_bytes(total_bytes)})")
                         last_progress = now
 
                 tape = s.get(Tape, tape_id)
@@ -260,15 +304,21 @@ def _import_one_tape(
                     sp.size_bytes or 0 for sp in
                     s.scalars(select(ContentTapeSpan).where(ContentTapeSpan.tape_id == tape_id)).all()
                 )
-                tape.last_verified_at = _now()
+                if measured_capacity_bytes:
+                    tape.capacity_native_bytes = measured_capacity_bytes
+                tape.last_scanned_at = _now()
+                if verify:
+                    tape.last_verified_at = _now()
                 tape.notes = (
                     f"{(tape.notes + chr(10)) if tape.notes else ''}"
-                    f"{_now().date()}: imported {n_units} pre-existing unit(s) "
-                    f"({total_bytes} B) — original write date unknown"
+                    f"{_now().date()}: {'imported' if verify else 'fast-scanned'} "
+                    f"{n_units} pre-existing unit(s) ({total_bytes} B)"
+                    f"{'' if verify else ' — not hash-verified, audit before trusting'}"
+                    f" — original write date unknown"
                 )
                 lib.finish_event(s, event, EventResult.success)
                 record_audit(s, actor=initiated_by, action="tape.import", entity_type="tape",
-                            entity_id=barcode, detail={"units": n_units, "bytes": total_bytes})
+                            entity_id=barcode, detail={"units": n_units, "bytes": total_bytes, "verify": verify})
             except Exception as exc:  # noqa: BLE001 - record, then still unmount/unload
                 lib.finish_event(s, event, EventResult.error, str(exc))
                 raise
@@ -286,6 +336,7 @@ def run_tape_import(
     source_machine: str | None = None,
     backup_category: str = "project_archive",
     initiated_by: str = "operator",
+    verify: bool = True,
     progress: ProgressCb | None = None,
     is_cancelled: CancelCb | None = None,
 ) -> dict:
@@ -350,7 +401,7 @@ def run_tape_import(
                         hw, barcode, drive_number, tape_id=tape_id, job_id=job_id,
                         initiated_by=initiated_by, project_name=project_name,
                         source_machine=source_machine, cat=cat,
-                        progress=progress, done=done, total=total,
+                        progress=progress, done=done, total=total, verify=verify,
                     )
                 except HardwareError as exc:
                     error = str(exc)

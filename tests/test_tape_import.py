@@ -139,6 +139,85 @@ def test_import_reports_intra_tape_scan_progress(seeded):
     assert all(total == 1 for _current, total, _msg in scan_calls)
 
 
+def test_fast_scan_lists_content_without_hashing_it(seeded):
+    db = seeded
+    hw = get_hardware()
+    _seed_legacy_tape(hw, "TEST006L8")
+
+    job = _run(db, JobType.tape_import, {"barcodes": ["TEST006L8"], "verify": False})
+    assert job.status == JobStatus.completed, job.error
+    assert job.result["succeeded"]["TEST006L8"] >= 1
+
+    tape = db.scalar(select(Tape).where(Tape.barcode == "TEST006L8"))
+    assert tape.status == TapeStatus.archived
+    assert tape.used_bytes > 0  # size is known without reading file content
+    assert tape.last_scanned_at is not None
+    assert tape.last_verified_at is None  # never hashed, so not "verified"
+
+    seq = db.scalar(select(SequenceContainer))
+    assert seq.verified_at is None
+    assert seq.manifest_ref is None
+
+    span = db.scalar(select(ContentTapeSpan).where(ContentTapeSpan.tape_id == tape.id))
+    assert span.verified_at is None
+    assert span.sha256 is None
+    assert span.size_bytes > 0  # listing still records size
+
+
+def test_a_later_full_import_hashes_content_a_fast_scan_only_listed(seeded):
+    db = seeded
+    hw = get_hardware()
+    _seed_legacy_tape(hw, "TEST007L8")
+
+    _run(db, JobType.tape_import, {"barcodes": ["TEST007L8"], "verify": False})
+    n_spans_after_scan = db.query(ContentTapeSpan).count()
+
+    job2 = _run(db, JobType.tape_import, {"barcodes": ["TEST007L8"]})  # verify defaults to True
+    assert job2.status == JobStatus.completed, job2.error
+    # same span rows reused, not duplicated — the idempotent-skip check only
+    # skips already-*verified* spans, so an unverified one is re-processed.
+    assert db.query(ContentTapeSpan).count() == n_spans_after_scan
+
+    tape = db.scalar(select(Tape).where(Tape.barcode == "TEST007L8"))
+    assert tape.last_scanned_at is not None
+    assert tape.last_verified_at is not None
+
+    span = db.scalar(select(ContentTapeSpan).where(ContentTapeSpan.tape_id == tape.id))
+    assert span.verified_at is not None
+    assert span.sha256 is not None
+
+
+def test_import_never_overwrites_capacity_in_simulator_mode(seeded):
+    """_measure_capacity_bytes is real-hardware-only — statvfs() on the
+    simulator's plain-directory "mount" would report the host disk's free
+    space, not the (deliberately tiny, for fast tests) simulated tape
+    capacity."""
+    db = seeded
+    hw = get_hardware()
+    _seed_legacy_tape(hw, "TEST001L8")
+    tape_before = db.scalar(select(Tape).where(Tape.barcode == "TEST001L8"))
+    seeded_capacity = tape_before.capacity_native_bytes
+
+    job = _run(db, JobType.tape_import, {"barcodes": ["TEST001L8"]})
+    assert job.status == JobStatus.completed, job.error
+
+    tape = db.scalar(select(Tape).where(Tape.barcode == "TEST001L8"))
+    assert tape.capacity_native_bytes == seeded_capacity
+
+
+def test_measure_capacity_bytes_only_applies_on_real_hardware(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import app.services.tape_import as ti
+
+    monkeypatch.setattr(ti, "get_settings", lambda: SimpleNamespace(hardware_backend="real"))
+    result = ti._measure_capacity_bytes(tmp_path)
+    assert result is not None and result > 0
+
+    monkeypatch.setattr(ti, "get_settings", lambda: SimpleNamespace(hardware_backend="simulator"))
+    assert ti._measure_capacity_bytes(tmp_path) is None
+
+
 def test_read_only_mount_actually_blocks_writes(seeded):
     hw = get_hardware()
     _seed_legacy_tape(hw, "TEST004L8")

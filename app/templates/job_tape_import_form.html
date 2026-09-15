@@ -22,12 +22,24 @@
     {% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
   </select>
 
+  <label>Mode</label>
+  <select name="mode">
+    <option value="verify">Full import + verify — read and hash every file (slow, trustworthy)</option>
+    <option value="fast">Fast scan — list files/folders and measured capacity only, no hashing (fast, unverified)</option>
+  </select>
+  <p class="tag">Full import reads and SHA256-hashes every file, the same trust anchor used for
+    anything else in the catalog — for a full LTO tape this takes as long as reading the whole
+    tape (hours). Fast scan only reads the tape's index (seconds to minutes) so you can see what's
+    on a tape and how full it is before committing to a full audit; content it catalogs is marked
+    "scanned" rather than "verified" and a later full import will pick it back up and hash it
+    properly. Re-running either mode against an already-<em>verified</em> tape skips what's already
+    confirmed; a fast scan never skips ahead of a full import.</p>
+
   <p class="tag">Runs in the background, mounting each tape <strong>read-only</strong> and cycling
     through whichever drives are free: load → mount read-only → scan and classify content exactly
-    like a write job would → hash every file → catalog → unmount → next tape. Can take a long time
-    per tape since it reads the whole thing. Re-running against an already-imported tape skips
-    anything already cataloged from it. One tape's failure doesn't stop the others; check the
-    job's Result for per-tape unit counts and failures.</p>
+    like a write job would → catalog (hashing every file in full-import mode) → unmount → next tape.
+    One tape's failure doesn't stop the others; check the job's Result for per-tape unit counts and
+    failures.</p>
   <p><button class="danger">Queue import job</button> <a class="btn ghost" href="/jobs">Cancel</a></p>
 </form>
 </div>

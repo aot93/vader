@@ -14,6 +14,11 @@
       <tr><th>First written</th><td>{{ tape.first_written_at | dt }}</td></tr>
       <tr><th>Last written</th><td>{{ tape.last_written_at | dt }}</td></tr>
       <tr><th>Last verified</th><td>{{ tape.last_verified_at | dt }}</td></tr>
+      <tr><th>Last scanned</th><td>{{ tape.last_scanned_at | dt }}
+        {% if tape.last_scanned_at and (not tape.last_verified_at or tape.last_scanned_at > tape.last_verified_at) %}
+          <span class="pill pending">not hash-verified</span>
+        {% endif %}
+      </td></tr>
       <tr><th>Location</th><td>{{ tape.physical_location or '—' }}</td></tr>
       <tr><th>Dedicated to</th><td>{{ tape.dedicated_source_machine or '—' }}</td></tr>
       <tr><th>Notes</th><td style="white-space:pre-wrap">{{ tape.notes or '—' }}</td></tr>

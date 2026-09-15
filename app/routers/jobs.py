@@ -152,6 +152,7 @@ def create_tape_import_job(
     project_name: str = Form(""),
     source_machine: str = Form(""),
     backup_category: str = Form("project_archive"),
+    mode: str = Form("verify"),
 ):
     parsed = [b.strip() for b in barcodes.replace(",", "\n").splitlines() if b.strip()]
     if not parsed:
@@ -161,6 +162,7 @@ def create_tape_import_job(
         "project_name": project_name.strip() or None,
         "source_machine": source_machine.strip() or None,
         "backup_category": backup_category,
+        "verify": mode != "fast",
     }
     job = enqueue(db, JobType.tape_import, params)
     db.commit()

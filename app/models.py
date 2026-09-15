@@ -148,6 +148,11 @@ class Tape(Base):
     first_written_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_written_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set by a fast (list-only, no hashing) tape_import scan. A full
+    # import/verify sets last_verified_at too; a fast scan only sets this —
+    # the Tapes page uses the two together to show "never looked at" /
+    # "scanned, not verified" / "verified" (plan doc item 5).
+    last_scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     write_pass_count: Mapped[int] = mapped_column(Integer, default=0)
     physical_location: Mapped[str | None] = mapped_column(String(128))
     offsite_pair_tape_id: Mapped[int | None] = mapped_column(ForeignKey("tapes.id"))
