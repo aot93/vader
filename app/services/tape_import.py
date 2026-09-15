@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -62,11 +63,19 @@ from app.services.manifests import (
     write_manifest,
 )
 from app.services.writer import _existing_span, _ltfs_relpath, _upsert_item, _upsert_sequence
+from app.web import format_bytes
 
 ProgressCb = Callable[[int, int, str], None]
 CancelCb = Callable[[], bool]
 
 _arm_lock = threading.Lock()
+
+# How often (seconds) to emit a progress update while scanning+hashing a
+# single tape's units. Time-based rather than count-based so it stays
+# responsive regardless of whether the units are many small files or a few
+# huge sequences — the thing being answered is "is this stuck?", not a
+# precise ETA.
+_PROGRESS_INTERVAL_SECONDS = 5.0
 
 
 class TapeImportError(RuntimeError):
@@ -191,9 +200,16 @@ def _import_file(db: Session, unit: FileUnit, *, ltfs_path: str, tape_id: int) -
 def _import_one_tape(
     hw, barcode: str, drive_number: int, *, tape_id: int, job_id: int, initiated_by: str,
     project_name: str | None, source_machine: str | None, cat: BackupCategory,
+    progress: ProgressCb, done: int, total: int,
 ) -> int:
     """Mount ``barcode`` (already loaded in ``drive_number``) read-only, scan
-    and catalog it, then unmount. Returns the number of units imported."""
+    and catalog it, then unmount. Returns the number of units imported.
+
+    ``progress``/``done``/``total`` are the job-level (tape-count) progress
+    callback and its current tape-level counters — ``done``/``total`` don't
+    change while this tape is being processed, only the message does, so a
+    long single-tape scan+hash no longer looks frozen in the UI.
+    """
     mount = hw.mount_ltfs(drive_number, read_only=True)
     try:
         try:
@@ -205,13 +221,15 @@ def _import_one_tape(
 
         n_units = 0
         total_bytes = 0
+        n_total_units = len(units)
+        last_progress = time.monotonic()
         with session_scope() as s:
             event = lib.log_event(
                 s, event_type=TapeEventType.import_tape, tape_id=tape_id,
                 drive_number=drive_number, initiated_by=initiated_by, job_id=job_id,
             )
             try:
-                for unit in units:
+                for i, unit in enumerate(units, start=1):
                     path = ltfs_paths[id(unit)]
                     if isinstance(unit, SequenceUnit):
                         span = _import_sequence(s, unit, ltfs_path=path, barcode=barcode, tape_id=tape_id)
@@ -220,6 +238,22 @@ def _import_one_tape(
                     if span:
                         n_units += 1
                         total_bytes += span.size_bytes or 0
+
+                    now = time.monotonic()
+                    if now - last_progress >= _PROGRESS_INTERVAL_SECONDS or i == n_total_units:
+                        # Commit first: `progress()` opens its own DB session
+                        # to update the Job row, which needs SQLite's single
+                        # write lock — still held by this still-open catalog
+                        # transaction otherwise, so the callback would just
+                        # block until busy_timeout and fail with "database is
+                        # locked". expire_on_commit=False (app.db.SessionLocal)
+                        # means `s` and everything loaded through it (e.g.
+                        # `event` below) stay usable after this commit.
+                        s.commit()
+                        progress(done, total,
+                                 f"drive {drive_number}: {barcode} — scanned {i}/{n_total_units} "
+                                 f"units, hashed {format_bytes(total_bytes)}")
+                        last_progress = now
 
                 tape = s.get(Tape, tape_id)
                 tape.used_bytes = sum(
@@ -316,6 +350,7 @@ def run_tape_import(
                         hw, barcode, drive_number, tape_id=tape_id, job_id=job_id,
                         initiated_by=initiated_by, project_name=project_name,
                         source_machine=source_machine, cat=cat,
+                        progress=progress, done=done, total=total,
                     )
                 except HardwareError as exc:
                     error = str(exc)

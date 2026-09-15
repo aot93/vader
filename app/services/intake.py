@@ -21,7 +21,9 @@ Types C / D (config, audio/media)
 """
 from __future__ import annotations
 
+import os
 import re
+import stat as stat_module
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -162,20 +164,29 @@ def scan_source(
             dirnames[:] = []
             continue
 
+        # One lstat() per file instead of is_file() + is_symlink() + stat()
+        # (each of those is its own FUSE round-trip on a mounted LTFS tape).
+        # A single lstat's st_mode tells us "regular file, not a symlink" in
+        # one shot, and its st_size is carried along for reuse below instead
+        # of being re-stat'd a second (or third) time.
         frame_groups: dict[str, list[FrameFile]] = defaultdict(list)
-        leftovers: list[str] = []
+        leftovers: list[tuple[str, int]] = []
         for name in sorted(filenames):
             fpath = d / name
-            if not fpath.is_file() or fpath.is_symlink():
-                continue
+            try:
+                st = os.lstat(fpath)
+            except OSError:
+                continue  # vanished between listdir and stat
+            if not stat_module.S_ISREG(st.st_mode):
+                continue  # symlinks and anything else that isn't a plain file
             m = frame_re.match(name)
             if m:
                 frame_groups[m.group("base")].append(
                     FrameFile(path=fpath, filename=name,
-                              frame=int(m.group("frame")), size=fpath.stat().st_size)
+                              frame=int(m.group("frame")), size=st.st_size)
                 )
             else:
-                leftovers.append(name)
+                leftovers.append((name, st.st_size))
 
         # Path convention: <root>/<project>/<sequence>/<shot>/frames…, but the
         # operator may point the job straight at a project dir, so root itself
@@ -204,32 +215,34 @@ def scan_source(
             ))
 
         # video chunks in this dir, grouped by base name
-        chunk_groups: dict[str, list[tuple[int, Path]]] = defaultdict(list)
-        for name in list(leftovers):
+        chunk_groups: dict[str, list[tuple[int, Path, int]]] = defaultdict(list)
+        remaining: list[tuple[str, int]] = []
+        for name, size in leftovers:
             m = chunk_re.match(name)
             if m:
-                chunk_groups[m.group("base")].append((int(m.group("idx")), d / name))
-                leftovers.remove(name)
+                chunk_groups[m.group("base")].append((int(m.group("idx")), d / name, size))
+            else:
+                remaining.append((name, size))
+        leftovers = remaining
         for base, chunks in chunk_groups.items():
-            chunks.sort()
+            chunks.sort(key=lambda c: (c[0], c[1]))
             total = len(chunks)
-            for idx, cpath in chunks:
+            for idx, cpath, size in chunks:
                 units.append(FileUnit(
                     content_type=ContentType.video_chunk,
                     path=cpath, source_path=str(cpath), filename=cpath.name,
-                    size=cpath.stat().st_size,
+                    size=size,
                     project_name=derived_project, video_name=base,
                     chunk_index=idx, total_chunks=total,
                     source_machine=source_machine, backup_category=backup_category,
                 ))
 
-        # everything else: Type C / D file-level
+        # everything else: Type C / D file-level — already lstat'd above, no
+        # further FUSE round-trips needed here.
         lowered_parts = {p.lower() for p in parts}
         dir_is_config = bool(lowered_parts & set(rules.config_dir_hints))
-        for name in leftovers:
+        for name, size in leftovers:
             fpath = d / name
-            if not fpath.is_file() or fpath.is_symlink():
-                continue
             ext = fpath.suffix.lower()
             if ext in rules.audio_media_exts and not dir_is_config:
                 ctype, tag = ContentType.audio_media, None
@@ -239,7 +252,7 @@ def scan_source(
                 ctype, tag = ContentType.config, "unclassified"
             units.append(FileUnit(
                 content_type=ctype, path=fpath, source_path=str(fpath),
-                filename=name, size=fpath.stat().st_size,
+                filename=name, size=size,
                 project_name=derived_project, source_machine=source_machine,
                 source_system_tag=tag, backup_category=backup_category,
             ))
@@ -248,8 +261,6 @@ def scan_source(
 
 
 def _walk_sorted(root: Path):
-    import os
-
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames.sort()
         yield dirpath, dirnames, filenames

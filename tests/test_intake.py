@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
+
 from app.models import ContentType
+from app.services import intake as intake_module
 from app.services.intake import FileUnit, SequenceUnit, scan_source
 
 
@@ -50,3 +53,65 @@ def test_unclassified_still_catalogued(tmp_path):
     u = units[0]
     assert isinstance(u, FileUnit)
     assert u.source_system_tag == "unclassified"
+
+
+def test_scan_does_exactly_one_stat_per_file(make_source, monkeypatch):
+    """Regression test for the redundant is_file()/is_symlink()/stat() calls
+    fixed in scan_source — each real file on a mounted (FUSE) source should
+    cost exactly one lstat() round-trip, not three (or five, for the files
+    that used to get re-checked a second time in the leftovers loop)."""
+    root = make_source()
+    expected_paths = {
+        os.path.join(dirpath, name)
+        for dirpath, _dirs, names in os.walk(root)
+        for name in names
+    }
+
+    calls: list[str] = []
+    real_lstat = os.lstat
+
+    def counting_lstat(path, *a, **kw):
+        # root.resolve() (once, up front) also calls lstat on ancestor dirs
+        # via pathlib internals — irrelevant here, only per-file calls scale
+        # with the number of files, so only those are counted.
+        s = str(path)
+        if s in expected_paths:
+            calls.append(s)
+        return real_lstat(path, *a, **kw)
+
+    monkeypatch.setattr(intake_module.os, "lstat", counting_lstat)
+    scan_source(root)
+
+    assert sorted(calls) == sorted(expected_paths)
+
+
+def test_scan_skips_symlinks(tmp_path):
+    d = tmp_path / "Proj"
+    d.mkdir()
+    real = d / "real.xyz"
+    real.write_bytes(b"data")
+    (d / "link.xyz").symlink_to(real)
+
+    units = scan_source(tmp_path)
+    assert len(units) == 1
+    assert units[0].filename == "real.xyz"
+
+
+def test_scan_tolerates_a_file_vanishing_mid_walk(tmp_path, monkeypatch):
+    d = tmp_path / "Proj"
+    d.mkdir()
+    (d / "gone.xyz").write_bytes(b"data")
+    (d / "stays.xyz").write_bytes(b"data")
+
+    real_lstat = os.lstat
+
+    def flaky_lstat(path, *a, **kw):
+        if str(path).endswith("gone.xyz"):
+            raise FileNotFoundError(path)
+        return real_lstat(path, *a, **kw)
+
+    monkeypatch.setattr(intake_module.os, "lstat", flaky_lstat)
+    units = scan_source(tmp_path)
+
+    assert len(units) == 1
+    assert units[0].filename == "stays.xyz"

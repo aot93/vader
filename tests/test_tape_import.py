@@ -18,6 +18,7 @@ from app.models import (
     TapeStatus,
 )
 from app.services.catalog import SearchFilters, search_content
+from app.services.tape_import import run_tape_import
 
 
 def _run(db, job_type, params):
@@ -110,6 +111,32 @@ def test_import_fails_clearly_if_tape_not_physically_present_but_still_registers
     tape = db.scalar(select(Tape).where(Tape.barcode == "GHOST999L8"))
     assert tape is not None
     assert tape.status == TapeStatus.archived
+
+
+def test_import_reports_intra_tape_scan_progress(seeded):
+    """A long tape_import must not look frozen: some progress() call has to
+    happen between mounting and unloading, not just before/after. Also
+    guards against the DB session/lock bug this introduced (the callback
+    opens its own session, which would deadlock against the still-open
+    per-tape catalog transaction if that transaction isn't committed first —
+    see the s.commit() in _import_one_tape)."""
+    db = seeded
+    hw = get_hardware()
+    _seed_legacy_tape(hw, "TEST005L8", frames=6)
+
+    job = enqueue(db, JobType.tape_import, {"barcodes": ["TEST005L8"]})
+    db.commit()
+
+    calls: list[tuple[int, int, str]] = []
+    result = run_tape_import(
+        db, job_id=job.id, barcodes=["TEST005L8"],
+        progress=lambda current, total, message: calls.append((current, total, message)),
+    )
+    assert result["succeeded"]["TEST005L8"] >= 1
+
+    scan_calls = [c for c in calls if "scanned" in c[2] and "TEST005L8" in c[2]]
+    assert scan_calls, calls
+    assert all(total == 1 for _current, total, _msg in scan_calls)
 
 
 def test_read_only_mount_actually_blocks_writes(seeded):
