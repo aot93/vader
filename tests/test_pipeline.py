@@ -341,6 +341,60 @@ def test_verify_flags_corruption_and_logs_read_error(seeded, make_source):
     assert db.query(ReadError).count() >= 0  # read-error table exists and is wired
 
 
+def test_verify_commits_incrementally_instead_of_holding_one_long_transaction(seeded, make_source):
+    """Regression test for the same class of bug already fixed once in
+    tape_import.py: run_verify's per-check loop used to hold one DB
+    transaction open for the entire run, with a single commit only at the
+    very end. Fixed by committing (throttled) right before each progress()
+    call — same shape, same reason: progress() opens its own DB session to
+    update the Job row, which needs the same write lock this function's own
+    session would otherwise still be holding.
+
+    This deletes a file (not just corrupts it) to force a genuine
+    ReadError, then checks — from a *second*, independent DB session,
+    inside the progress callback itself, while run_verify is still
+    running — that the ReadError row is already visible. That only works
+    if run_verify actually committed it, not merely added-and-flushed it
+    to its own uncommitted transaction.
+    """
+    from app.db import SessionLocal
+    from app.hardware import get_hardware
+    from app.models import ReadError
+    from app.services.verification import run_verify
+
+    db = seeded
+    src = make_source(frames=8)
+    _run(db, JobType.write, {"source_path": str(src), "mode": "standard"})
+
+    hw = get_hardware()
+    vol_root = Path(hw.volumes)
+    exrs = sorted(vol_root.rglob("*.exr"))
+    assert len(exrs) >= 2
+    exrs[0].unlink()  # missing file -> a genuine ReadError, not just a checksum mismatch
+
+    tape = db.scalars(select(Tape).where(Tape.status.in_([TapeStatus.active, TapeStatus.full]))).first()
+
+    job = enqueue(db, JobType.verify, {"barcode": tape.barcode, "full": True})
+    db.commit()
+    jid = job.id
+
+    calls: list[tuple[int, int, str]] = []
+    seen_mid_run = {"read_error": False}
+
+    def progress(current: int, total: int, message: str) -> None:
+        calls.append((current, total, message))
+        with SessionLocal() as s2:
+            if s2.query(ReadError).filter(ReadError.job_id == jid).count() > 0:
+                seen_mid_run["read_error"] = True
+
+    result = run_verify(db, job_id=jid, barcode=tape.barcode, full=True, progress=progress)
+
+    assert result["verified"] is False
+    assert result["read_errors"]
+    assert calls
+    assert seen_mid_run["read_error"], "ReadError row was never visible from an independent session mid-run"
+
+
 def test_write_reuses_a_scratch_tape_that_already_carries_an_ltfs_filesystem(seeded, make_source):
     """A "scratch" tape is, by definition, one that may already have been
     formatted before — real mkltfs refuses outright on such a medium unless

@@ -10,6 +10,7 @@ visible over time rather than being a one-off surprise.
 from __future__ import annotations
 
 import random
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,6 +34,17 @@ from app.services.manifests import load_manifest
 
 ProgressCb = Callable[[int, int, str], None]
 CancelCb = Callable[[], bool]
+
+# How often (seconds) to emit a progress update during a verify run's
+# per-check loop. Same shape/rationale as app.services.tape_import's
+# _PROGRESS_INTERVAL_SECONDS: a full verify over many thousands of checks
+# used to hold one DB transaction open for the whole run (no commit inside
+# the loop) — the progress() callback opens its own session to update the
+# Job row, which needs the same write lock, so it must be released first or
+# the callback just blocks until busy_timeout and fails with "database is
+# locked". Committing right before each throttled progress() call fixes
+# both the lock-held-too-long issue and that deadlock risk at once.
+_PROGRESS_INTERVAL_SECONDS = 5.0
 
 
 def _now() -> datetime:
@@ -154,6 +166,7 @@ def run_verify(
             selected = rng.sample(all_checks, k) if k else []
         total = len(selected)
 
+        last_progress = time.monotonic()
         for i, chk in enumerate(selected, 1):
             if is_cancelled():
                 break
@@ -168,7 +181,15 @@ def run_verify(
                 if chk.span_id:
                     bad_span_ids.add(chk.span_id)
                 checked += 1
-                progress(i, total, f"read error: {chk.label}")
+                # Read errors are exactly the diagnostic data that shouldn't
+                # be at risk from a mid-job crash before the next throttled
+                # commit below — commit immediately, independent of the
+                # progress throttle.
+                db.commit()
+                now = time.monotonic()
+                if now - last_progress >= _PROGRESS_INTERVAL_SECONDS or i == total:
+                    progress(i, total, f"read error: {chk.label}")
+                    last_progress = now
                 continue
 
             if chk.expected and actual != chk.expected:
@@ -178,7 +199,12 @@ def run_verify(
             elif chk.span_id:
                 ok_span_ids.add(chk.span_id)
             checked += 1
-            progress(i, total, chk.label)
+
+            now = time.monotonic()
+            if now - last_progress >= _PROGRESS_INTERVAL_SECONDS or i == total:
+                db.commit()
+                progress(i, total, chk.label)
+                last_progress = now
 
         # mark verified: spans with at least one OK check and no failures
         now = _now()
