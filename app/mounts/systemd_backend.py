@@ -19,9 +19,37 @@ from app.mounts.base import ConnectionSpec, MountBackend, MountError
 _SYSTEMCTL_TIMEOUT = 20
 
 
+def _systemd_escape_path(path: str) -> str:
+    """The basename systemd requires for a .mount/.automount unit whose
+    Where= is ``path`` — NOT a hand-rolled slug. A unit's filename must be
+    the exact systemd-escaped form of its Where= path (only "/" becomes "-";
+    a literal "-" or "." or uppercase letter already in the path is kept
+    almost as-is, with genuinely special characters \\xHH-escaped) or systemd
+    refuses to load it outright ("Where= setting doesn't match unit name").
+    ``Connection.unit_name`` (from ``app.mounts.base.unit_name_for``) is a
+    naive hostname slug that gets this wrong for almost any real hostname
+    (dots, hyphens, mixed case) — shell out to the real tool instead of
+    re-deriving its rules by hand a second time and risking the same bug
+    again in a new shape.
+    """
+    try:
+        proc = subprocess.run(
+            ["systemd-escape", "--path", path], check=True, capture_output=True,
+            text=True, timeout=5,
+        )
+    except FileNotFoundError as exc:
+        raise MountError("systemd-escape not found — is this a systemd host?") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise MountError(f"systemd-escape --path {path} timed out") from exc
+    except subprocess.CalledProcessError as exc:
+        raise MountError(f"systemd-escape --path {path} failed: {exc.stderr.strip()}") from exc
+    return proc.stdout.strip()
+
+
 def _unit_paths(spec: ConnectionSpec) -> tuple[Path, Path]:
     base = Path(get_settings().smb_systemd_dir)
-    return base / f"{spec.unit_name}.mount", base / f"{spec.unit_name}.automount"
+    name = _systemd_escape_path(spec.mount_path)
+    return base / f"{name}.mount", base / f"{name}.automount"
 
 
 def _mount_unit(spec: ConnectionSpec) -> str:
