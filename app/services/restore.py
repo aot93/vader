@@ -11,6 +11,7 @@ copy, never to the primary deliverable path.
 """
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -40,6 +41,14 @@ ProgressCb = Callable[[int, int, str], None]
 CancelCb = Callable[[], bool]
 
 _EXCLUDED_PREFIXES = ("_manifests/", "_manifests", "_catalog/", "_catalog")
+
+# Same shape/rationale as app.services.tape_import's/verification's
+# _PROGRESS_INTERVAL_SECONDS: committing right before each throttled
+# progress() call avoids both an unnecessarily long-held transaction across
+# a whole tape's file list and a deadlock against progress()'s own DB
+# session (which needs the same write lock this function's session would
+# otherwise still be holding).
+_PROGRESS_INTERVAL_SECONDS = 5.0
 
 
 def _now() -> datetime:
@@ -275,6 +284,7 @@ def run_restore(
     restored: list[str] = []
     problems: list[str] = []
 
+    last_progress = time.monotonic()
     try:
         for t in tapes:
             if is_cancelled():
@@ -294,7 +304,12 @@ def run_restore(
                         _restore_one(mount, dest_root, f, restored, problems, req.include_manifests)
                     except (OSError, HardwareError) as exc:
                         problems.append(f"{f['label']}: {exc}")
-                    progress(done, total_files, f"{t['barcode']}: {f['label']}")
+
+                    now = time.monotonic()
+                    if now - last_progress >= _PROGRESS_INTERVAL_SECONDS or done == total_files:
+                        db.commit()
+                        progress(done, total_files, f"{t['barcode']}: {f['label']}")
+                        last_progress = now
             finally:
                 try:
                     hw.unmount_ltfs(drive)

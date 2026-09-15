@@ -163,6 +163,55 @@ def test_search_then_prepare_and_run_restore(seeded, make_source, tmp_path):
     assert not list(dest.rglob("*.json"))
 
 
+def test_restore_commits_before_the_final_progress_call(seeded, make_source, monkeypatch):
+    """Same class of fix as run_verify/tape_import: restore's per-file loop
+    now commits (throttled) right before each progress() call instead of
+    only at tape boundaries. Unlike verify/tape_import, _restore_one never
+    writes to the DB itself, so there's no pending write for a concurrent
+    progress()-callback session to actually deadlock against under SQLite
+    — the benefit here is bounding how long the session's transaction/
+    snapshot stays open (matters under Postgres's connection pool once
+    jobs run concurrently), not avoiding a reproducible local deadlock.
+    So this asserts the mechanism directly (a commit happens before the
+    guaranteed final-file progress() call) via a commit-counting session,
+    rather than trying to reproduce an externally-observable failure that
+    doesn't manifest under SQLite for this particular call path."""
+    from app.db import SessionLocal
+    from app.services.restore import run_restore
+
+    db = seeded
+    src = make_source()
+    _run(db, JobType.write, {"source_path": str(src), "mode": "standard"})
+
+    hits = search_content(db, SearchFilters())
+    seq_hit = next(h for h in hits if h.kind == "sequence")
+    req = prepare_restore(db, sequence_container_ids=[seq_hit.id], requested_by="tester")
+    db.expire_all()
+
+    job = enqueue(db, JobType.restore, {"restore_id": req.id})
+    db.commit()
+    jid = job.id
+
+    s2 = SessionLocal()
+    commit_calls: list[None] = []
+    orig_commit = s2.commit
+
+    def counting_commit():
+        commit_calls.append(None)
+        return orig_commit()
+
+    monkeypatch.setattr(s2, "commit", counting_commit)
+    result = run_restore(s2, job_id=jid, restore_id=req.id)
+    s2.close()
+
+    assert result["files_restored"] == 6
+    # Fixed baseline regardless of file count (in_progress, one load, one
+    # unload, completed, audit = 5 commits for a single-tape restore) plus
+    # exactly one more from the new per-file throttle's guaranteed commit
+    # on the last file (done == total_files) — proves that commit fires.
+    assert len(commit_calls) == 6, commit_calls
+
+
 def test_write_job_ingests_from_a_connection_mount_path(seeded, make_source):
     """Coverage gap noted while explaining sim fidelity: a write job's
     source_path can be an ingest Connection's real mount_path (as suggested
