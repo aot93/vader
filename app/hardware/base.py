@@ -68,7 +68,14 @@ class LibraryState:
 
 class TapeHardware(abc.ABC):
     """Contract the job layer depends on. Implementations must be safe to call
-    from a single background worker thread (operations are serialised upstream)."""
+    from multiple threads concurrently — the job worker can run several jobs
+    on different drives at once. Arm-moving operations (load/unload/clean)
+    are additionally serialised app-wide by a shared lock in
+    ``app.services.library`` (the physical changer arm can only move one
+    tape at a time, regardless of how many drives exist); everything else
+    (mkltfs, mount/unmount) only needs to be safe *per drive*, which each
+    implementation is responsible for on its own — see
+    ``SimulatedHardware._state_lock`` for how the simulator backend does it."""
 
     backend: str = "abstract"
 

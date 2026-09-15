@@ -4,6 +4,7 @@ and §3.7, and the cached ``library_slots`` snapshot stays current.
 """
 from __future__ import annotations
 
+import threading
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -19,6 +20,16 @@ from app.models import (
     TapeStatus,
 )
 from app.services.audit import record_audit
+
+# The physical robotic arm can only move one tape at a time, so every action
+# that moves it (load/unload/clean) is serialized on this one shared lock —
+# shared across every job type via load_tape/unload_tape/clean_drive below,
+# rather than each caller managing its own (batch_format.py and
+# tape_import.py used to each keep a private _arm_lock; two separate Lock
+# objects never actually serialize each other, a latent bug that only
+# mattered once jobs could run concurrently). format_tape() does not need
+# this lock — mkltfs doesn't move the changer arm.
+_arm_lock = threading.Lock()
 
 
 def _now() -> datetime:
@@ -106,57 +117,72 @@ def _tape_by_barcode(db: Session, barcode: str) -> Tape | None:
 
 def load_tape(db: Session, slot: int, drive: int, *, initiated_by: str = "operator",
               job_id: int | None = None) -> None:
-    hw = get_hardware()
-    state = hw.library_status()
-    slot_state = state.slot(slot)
-    barcode = slot_state.barcode if slot_state else None
-    tape = _tape_by_barcode(db, barcode) if barcode else None
-    event = log_event(db, event_type=TapeEventType.load, tape_id=tape.id if tape else None,
-                      slot_number=slot, drive_number=drive, initiated_by=initiated_by, job_id=job_id)
-    try:
-        hw.load(slot, drive)
-        sync_snapshot(db, hw.library_status())
-        if tape:
-            tape.physical_location = f"drive {drive}"
-        finish_event(db, event, EventResult.success)
-    except HardwareError as exc:
-        finish_event(db, event, EventResult.error, str(exc))
-        raise
+    with _arm_lock:
+        hw = get_hardware()
+        state = hw.library_status()
+        slot_state = state.slot(slot)
+        barcode = slot_state.barcode if slot_state else None
+        tape = _tape_by_barcode(db, barcode) if barcode else None
+        event = log_event(db, event_type=TapeEventType.load, tape_id=tape.id if tape else None,
+                          slot_number=slot, drive_number=drive, initiated_by=initiated_by, job_id=job_id)
+        try:
+            hw.load(slot, drive)
+            sync_snapshot(db, hw.library_status())
+            if tape:
+                tape.physical_location = f"drive {drive}"
+            finish_event(db, event, EventResult.success)
+        except HardwareError as exc:
+            finish_event(db, event, EventResult.error, str(exc))
+            raise
 
 
-def unload_tape(db: Session, slot: int, drive: int, *, initiated_by: str = "operator",
+def unload_tape(db: Session, slot: int | None, drive: int, *, initiated_by: str = "operator",
                 job_id: int | None = None) -> None:
-    hw = get_hardware()
-    state = hw.library_status()
-    drive_state = state.drive(drive)
-    barcode = drive_state.loaded_barcode if drive_state else None
-    tape = _tape_by_barcode(db, barcode) if barcode else None
-    event = log_event(db, event_type=TapeEventType.unload, tape_id=tape.id if tape else None,
-                      slot_number=slot, drive_number=drive, initiated_by=initiated_by, job_id=job_id)
-    try:
-        hw.unload(slot, drive)
-        sync_snapshot(db, hw.library_status())
-        if tape:
-            tape.physical_location = f"slot {slot}"
-        finish_event(db, event, EventResult.success)
-    except HardwareError as exc:
-        finish_event(db, event, EventResult.error, str(exc))
-        raise
+    """``slot=None`` means "any free storage slot" — resolved here, under the
+    arm lock, not by the caller beforehand. Every caller wants exactly that
+    (nobody ever needs a *specific* return slot); resolving it outside the
+    lock used to be a real race between two concurrently-unloading drives —
+    both could see the same slot as free and both target it, one winning and
+    the other failing with "slot occupied" (confirmed live: caught by
+    tests/test_pipeline.py's batch_format test intermittently failing once
+    two drives could genuinely unload at the same time)."""
+    with _arm_lock:
+        hw = get_hardware()
+        state = hw.library_status()
+        if slot is None:
+            slot = next((s.number for s in state.slots if s.barcode is None), None)
+            if slot is None:
+                raise HardwareError("no free storage slot to return the tape to")
+        drive_state = state.drive(drive)
+        barcode = drive_state.loaded_barcode if drive_state else None
+        tape = _tape_by_barcode(db, barcode) if barcode else None
+        event = log_event(db, event_type=TapeEventType.unload, tape_id=tape.id if tape else None,
+                          slot_number=slot, drive_number=drive, initiated_by=initiated_by, job_id=job_id)
+        try:
+            hw.unload(slot, drive)
+            sync_snapshot(db, hw.library_status())
+            if tape:
+                tape.physical_location = f"slot {slot}"
+            finish_event(db, event, EventResult.success)
+        except HardwareError as exc:
+            finish_event(db, event, EventResult.error, str(exc))
+            raise
 
 
 def clean_drive(db: Session, drive: int, cleaning_slot: int, *, initiated_by: str = "operator") -> None:
-    hw = get_hardware()
-    event = log_event(db, event_type=TapeEventType.clean, slot_number=cleaning_slot,
-                      drive_number=drive, initiated_by=initiated_by)
-    try:
-        hw.clean_drive(drive, cleaning_slot)
-        sync_snapshot(db, hw.library_status())
-        finish_event(db, event, EventResult.success)
-        record_audit(db, actor=initiated_by, action="drive.clean",
-                     detail={"drive": drive, "cleaning_slot": cleaning_slot})
-    except HardwareError as exc:
-        finish_event(db, event, EventResult.error, str(exc))
-        raise
+    with _arm_lock:
+        hw = get_hardware()
+        event = log_event(db, event_type=TapeEventType.clean, slot_number=cleaning_slot,
+                          drive_number=drive, initiated_by=initiated_by)
+        try:
+            hw.clean_drive(drive, cleaning_slot)
+            sync_snapshot(db, hw.library_status())
+            finish_event(db, event, EventResult.success)
+            record_audit(db, actor=initiated_by, action="drive.clean",
+                         detail={"drive": drive, "cleaning_slot": cleaning_slot})
+        except HardwareError as exc:
+            finish_event(db, event, EventResult.error, str(exc))
+            raise
 
 
 def format_tape(db: Session, drive: int, barcode: str, *, force: bool = False,

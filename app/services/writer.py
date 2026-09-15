@@ -103,12 +103,13 @@ class _Drive:
             self.hw.unmount_ltfs(self.n)
         except HardwareError:
             pass
-        # return the tape to the first free storage slot
-        state = self.hw.library_status()
-        free = next((s.number for s in state.slots if s.barcode is None), None)
-        if free is not None:
-            lib.unload_tape(self.db, free, self.n, initiated_by=self.actor, job_id=self.job_id)
+        # return the tape to any free storage slot (resolved atomically,
+        # under the arm lock, inside unload_tape itself)
+        try:
+            lib.unload_tape(self.db, None, self.n, initiated_by=self.actor, job_id=self.job_id)
             self.db.commit()
+        except HardwareError:
+            pass
         self.loaded_barcode = None
         self.mount = None
 

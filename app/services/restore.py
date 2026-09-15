@@ -300,11 +300,13 @@ def run_restore(
                     hw.unmount_ltfs(drive)
                 except HardwareError:
                     pass
-                state = hw.library_status()
-                free = next((s.number for s in state.slots if s.barcode is None), None)
-                if free is not None:
-                    lib.unload_tape(db, free, drive, initiated_by=actor, job_id=job_id)
+                # any free storage slot (resolved atomically, under the arm
+                # lock, inside unload_tape itself)
+                try:
+                    lib.unload_tape(db, None, drive, initiated_by=actor, job_id=job_id)
                     db.commit()
+                except HardwareError:
+                    pass
 
         req.status = RestoreStatus.completed if not problems else RestoreStatus.failed
         req.fulfilled_at = _now()

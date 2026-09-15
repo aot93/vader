@@ -25,9 +25,11 @@ see ``_register_archived``. Each tape's content is recorded as self-contained
 of these legacy tapes, re-importing each one catalogs them as separate spans
 under the same unit_key rather than reconstructing the original split.
 
-Like batch_format, the arm (load/unload) is serialised across drives with
-_arm_lock while each drive's mount/scan/catalog work runs concurrently — that
-part is what's worth parallelising, since reading a whole LTO tape is slow.
+Like batch_format, the arm (load/unload) is serialised across drives —
+lib.load_tape/lib.unload_tape share one lock internally (app.services.
+library) — while each drive's mount/scan/catalog work runs concurrently —
+that part is what's worth parallelising, since reading a whole LTO tape is
+slow.
 
 Two modes (``verify`` flag on :func:`run_tape_import`): the default full
 import reads and SHA256-hashes every file, the same trust anchor as any
@@ -80,8 +82,6 @@ from app.web import format_bytes
 ProgressCb = Callable[[int, int, str], None]
 CancelCb = Callable[[], bool]
 
-_arm_lock = threading.Lock()
-
 # How often (seconds) to emit a progress update while scanning+hashing a
 # single tape's units. Time-based rather than count-based so it stays
 # responsive regardless of whether the units are many small files or a few
@@ -104,14 +104,6 @@ def _slot_of(barcode: str) -> int:
     if slot is None:
         raise HardwareError(f"tape {barcode} is not in a storage slot")
     return slot
-
-
-def _first_free_slot() -> int:
-    state = get_hardware().library_status()
-    free = next((s.number for s in state.slots if s.barcode is None), None)
-    if free is None:
-        raise HardwareError("no free storage slot to return the tape to")
-    return free
 
 
 def _free_drives() -> list[int]:
@@ -392,7 +384,7 @@ def run_tape_import(
                 with session_scope() as s:
                     tape_id = _register_archived(s, barcode)
                 progress(done, total, f"drive {drive_number}: loading {barcode}")
-                with _arm_lock, session_scope() as s:
+                with session_scope() as s:
                     lib.load_tape(s, _slot_of(barcode), drive_number,
                                   initiated_by=initiated_by, job_id=job_id)
                 try:
@@ -410,8 +402,8 @@ def run_tape_import(
                 finally:
                     progress(done, total, f"drive {drive_number}: unloading {barcode}")
                     try:
-                        with _arm_lock, session_scope() as s:
-                            lib.unload_tape(s, _first_free_slot(), drive_number,
+                        with session_scope() as s:
+                            lib.unload_tape(s, None, drive_number,
                                             initiated_by=initiated_by, job_id=job_id)
                     except HardwareError as exc:
                         note = f"failed to unload: {exc}"

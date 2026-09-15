@@ -8,11 +8,11 @@ verb to call. This module's only job is the batch cycling: load -> format ->
 unload -> next tape, across as many drives as are free, so a run of many
 tapes doesn't serialise through a single drive for hours.
 
-The physical robotic arm can only move one tape at a time, so ``_arm_lock``
-serialises calls to ``lib.load_tape`` / ``lib.unload_tape`` even though the
-``mkltfs`` calls themselves (each already-loaded onto its own drive) run
-concurrently — that's the part worth parallelising, since it's what can take
-up to ~2h per tape on LTO-9.
+The physical robotic arm can only move one tape at a time — ``lib.load_tape``/
+``lib.unload_tape`` serialise on a shared lock internally (``app.services.
+library``), even though the ``mkltfs`` calls themselves (each already-loaded
+onto its own drive) run concurrently — that's the part worth parallelising,
+since it's what can take up to ~2h per tape on LTO-9.
 """
 from __future__ import annotations
 
@@ -32,8 +32,6 @@ from app.services.audit import record_audit
 ProgressCb = Callable[[int, int, str], None]
 CancelCb = Callable[[], bool]
 
-_arm_lock = threading.Lock()
-
 
 class BatchFormatError(RuntimeError):
     pass
@@ -45,14 +43,6 @@ def _slot_of(barcode: str) -> int:
     if slot is None:
         raise HardwareError(f"tape {barcode} is not in a storage slot")
     return slot
-
-
-def _first_free_slot() -> int:
-    state = get_hardware().library_status()
-    free = next((s.number for s in state.slots if s.barcode is None), None)
-    if free is None:
-        raise HardwareError("no free storage slot to return the tape to")
-    return free
 
 
 def _free_drives() -> list[int]:
@@ -123,7 +113,7 @@ def run_batch_format(
             error: str | None = None
             try:
                 progress(done, total, f"drive {drive_number}: loading {barcode}")
-                with _arm_lock, session_scope() as s:
+                with session_scope() as s:
                     lib.load_tape(s, _slot_of(barcode), drive_number,
                                   initiated_by=initiated_by, job_id=job_id)
                 try:
@@ -162,8 +152,8 @@ def run_batch_format(
                     # loaded for the rest of the batch.
                     progress(done, total, f"drive {drive_number}: unloading {barcode}")
                     try:
-                        with _arm_lock, session_scope() as s:
-                            lib.unload_tape(s, _first_free_slot(), drive_number,
+                        with session_scope() as s:
+                            lib.unload_tape(s, None, drive_number,
                                             initiated_by=initiated_by, job_id=job_id)
                     except HardwareError as exc:
                         note = f"failed to unload: {exc}"
