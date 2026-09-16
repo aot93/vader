@@ -266,3 +266,54 @@ and item 5 shipped independently of item 3. Still open for item 3/4:)
    bigger items?~~ Resolved: item 5 first, shipped. Item 3 (and whether
    item 4 is still worth doing on its own) remain open for whenever this is
    picked back up.
+
+## New finding, post item-3: transient tape-changer arm errors — no retry, and cleanup failures are inconsistently visible
+
+Found testing the write-path fix live, after items 1–5 above had already
+landed: a fully successful write job (data written, checksummed, catalogued
+— tape correctly flipped to `active` with the right `used_bytes`) still
+ended with the post-write robot-arm unload (`mtx unload`, returning the tape
+from the drive to a storage slot) failing once with a real but transient
+SCSI error (`Illegal Request`, sense 53/03 — `MOVE MEDIUM` momentarily
+rejected). Retrying the *exact same* `mtx unload` command by hand seconds
+later succeeded immediately — confirmed transient, not a persistent
+hardware fault or a code bug, and not something introduced by item 3's
+arm-lock work.
+
+Checked how each caller currently handles a failed cleanup unload. Item 3
+already centralized the actual arm call in `library.py`'s
+`load_tape`/`unload_tape`, and it always logs a `TapeEvent` with
+`EventResult.error` before re-raising `HardwareError`, so every failure at
+least lands in the audit trail — but what happens above that point still
+varies by caller:
+
+- `writer.py::_Drive.release()` and `verification.py`'s equivalent cleanup:
+  `except HardwareError: pass` — silently swallowed, nothing on the job
+  result. A job can report `completed` while a tape is still physically
+  sitting in a drive, un-returned, with the only signal being a separate
+  `TapeEvent` row an operator would have to think to go check.
+- `restore.py`: same silent-swallow shape.
+- `tape_import.py` / `batch_format.py`: already better — catch
+  `HardwareError` and fold it into the job's own failure/error message
+  (`"...; also failed to unload: {exc}"`), so at least the job itself shows
+  something happened.
+
+Proposed fix:
+- Add a small bounded retry (e.g. 2 attempts, short delay between) around
+  the actual `hw.load()`/`hw.unload()` SCSI call inside
+  `library.py::load_tape`/`unload_tape` — one central place rather than
+  patching every caller, and covers both directions since a transient
+  `MOVE MEDIUM` failure isn't obviously load-only or unload-only.
+- After retries are exhausted, keep raising `HardwareError` (unchanged
+  contract) — but standardize what callers do with it: every cleanup site
+  (`writer.py`, `verification.py`, `restore.py`, matching what
+  `tape_import.py`/`batch_format.py` already do) should attach a warning to
+  the job's own result/error when a post-work cleanup unload fails, not
+  swallow it silently. The archival work itself succeeding should still let
+  the job report success — this is about not hiding "a tape needs manual
+  attention" behind a job that otherwise looks perfectly fine.
+
+**Effort:** small-medium (retry is a small change in one place; auditing
+4 call sites for consistent visibility is the rest of the work).
+**Risk:** low. **Depends on:** nothing — orthogonal to items 1–5, safe to
+pick up independently.
