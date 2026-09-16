@@ -124,6 +124,16 @@ class MountBackend(abc.ABC):
     def check_health(self, spec: ConnectionSpec) -> tuple[bool, str | None]:
         """Return ``(healthy, error_detail)``."""
 
+    def display_unit_name(self, spec: ConnectionSpec) -> str:
+        """The unit basename an operator should actually run ``systemctl``
+        against for this connection — ``spec.unit_name`` by default.
+        :class:`~app.mounts.systemd_backend.SystemdMountBackend` overrides
+        this: its real on-disk unit filename is derived independently (via
+        ``systemd-escape``, not this naive slug), so showing the plain
+        ``unit_name`` there would point an operator at a unit that doesn't
+        exist."""
+        return spec.unit_name
+
 
 @lru_cache(maxsize=1)
 def get_mount_backend() -> MountBackend:

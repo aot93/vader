@@ -20,7 +20,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 
-from app.hardware import get_hardware
+from app.hardware import LibraryState, get_hardware
 from app.models import Job, JobType
 
 _lock = threading.Lock()
@@ -66,25 +66,36 @@ def drive_need(job: Job) -> DriveNeed:
     return NoDrive()  # backup
 
 
-def _physically_free() -> set[int]:
-    return {d.number for d in get_hardware().library_status().drives if d.loaded_barcode is None}
+def _physically_free(state: LibraryState) -> set[int]:
+    return {d.number for d in state.drives if d.loaded_barcode is None}
 
 
-def try_claim(drives: set[int]) -> bool:
-    """All-or-nothing claim of an exact set of drive numbers."""
+def try_claim(drives: set[int], state: LibraryState | None = None) -> bool:
+    """All-or-nothing claim of an exact set of drive numbers.
+
+    ``state``: a caller already holding a fresh ``library_status()`` (e.g.
+    the worker, once per poll tick) should pass it in — on real hardware
+    that call shells out to ``mtx status``, and re-fetching it once per
+    queued job per tick (as every caller used to, implicitly) means one
+    tick with N queued jobs made N redundant subprocess calls for state that
+    hadn't changed since the tick started. Omit it for a one-off call (e.g.
+    a test) and a fresh state is fetched here instead.
+    """
+    state = state if state is not None else get_hardware().library_status()
     with _lock:
-        free = _physically_free() - _claimed
+        free = _physically_free(state) - _claimed
         if not drives <= free:
             return False
         _claimed.update(drives)
         return True
 
 
-def try_claim_any(min_n: int, max_n: int) -> set[int] | None:
+def try_claim_any(min_n: int, max_n: int, state: LibraryState | None = None) -> set[int] | None:
     """Claim up to ``max_n`` free drives, or none at all if fewer than
-    ``min_n`` are currently free."""
+    ``min_n`` are currently free. See ``try_claim`` for ``state``."""
+    state = state if state is not None else get_hardware().library_status()
     with _lock:
-        free = sorted(_physically_free() - _claimed)
+        free = sorted(_physically_free(state) - _claimed)
         if len(free) < min_n:
             return None
         chosen = set(free[:max_n])
@@ -92,17 +103,17 @@ def try_claim_any(min_n: int, max_n: int) -> set[int] | None:
         return chosen
 
 
-def try_claim_for(job: Job) -> set[int] | None:
+def try_claim_for(job: Job, state: LibraryState | None = None) -> set[int] | None:
     """Attempt to claim whatever drives ``job`` needs right now. Returns the
     claimed set (empty for a ``NoDrive`` job — always startable) or ``None``
-    if the need can't be satisfied yet."""
+    if the need can't be satisfied yet. See ``try_claim`` for ``state``."""
     need = drive_need(job)
     if isinstance(need, NoDrive):
         return set()
     if isinstance(need, ExactDrives):
-        return set(need.drives) if try_claim(set(need.drives)) else None
+        return set(need.drives) if try_claim(set(need.drives), state) else None
     if isinstance(need, AnyDrives):
-        return try_claim_any(need.min_n, need.max_n)
+        return try_claim_any(need.min_n, need.max_n, state)
     raise TypeError(f"unhandled drive need: {need!r}")  # pragma: no cover
 
 

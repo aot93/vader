@@ -58,3 +58,96 @@ def test_job_error_and_actions_show_on_both_full_page_and_the_polled_partial():
         assert partial.status_code == 200
         assert "boom: no free drives available" in partial.text
         assert "Re-run with same parameters" in partial.text
+
+
+def test_pause_button_shown_only_for_a_running_write_job():
+    from app.db import SessionLocal
+    from app.models import Job, JobStatus, JobType
+
+    with TestClient(app) as client:
+        with SessionLocal() as db:
+            write_job = Job(job_type=JobType.write, params={}, status=JobStatus.running)
+            verify_job = Job(job_type=JobType.verify, params={}, status=JobStatus.running)
+            db.add_all([write_job, verify_job])
+            db.commit()
+            write_id, verify_id = write_job.id, verify_job.id
+
+        write_page = client.get(f"/jobs/{write_id}")
+        assert f'action="/jobs/{write_id}/pause"' in write_page.text
+
+        # pause is write-only for now (see PLAN_tape_import_optimization.md)
+        verify_page = client.get(f"/jobs/{verify_id}")
+        assert f'action="/jobs/{verify_id}/pause"' not in verify_page.text
+
+
+def test_pause_endpoint_rejects_non_write_job_types():
+    from app.db import SessionLocal
+    from app.models import Job, JobStatus, JobType
+
+    with TestClient(app) as client:
+        with SessionLocal() as db:
+            job = Job(job_type=JobType.verify, params={}, status=JobStatus.running)
+            db.add(job)
+            db.commit()
+            job_id = job.id
+
+        resp = client.post(f"/jobs/{job_id}/pause")
+        assert resp.status_code == 400
+
+
+def test_queued_write_job_pause_shortcuts_straight_to_paused():
+    from app.db import SessionLocal
+    from app.models import Job, JobStatus, JobType
+
+    with TestClient(app) as client:
+        with SessionLocal() as db:
+            job = Job(job_type=JobType.write, params={}, status=JobStatus.queued)
+            db.add(job)
+            db.commit()
+            job_id = job.id
+
+        client.post(f"/jobs/{job_id}/pause", follow_redirects=False)
+
+        with SessionLocal() as db:
+            assert db.get(Job, job_id).status == JobStatus.paused
+
+        page = client.get(f"/jobs/{job_id}")
+        assert "Resume" in page.text
+
+
+def test_resume_endpoint_rejects_a_non_paused_job():
+    from app.db import SessionLocal
+    from app.models import Job, JobStatus, JobType
+
+    with TestClient(app) as client:
+        with SessionLocal() as db:
+            job = Job(job_type=JobType.write, params={}, status=JobStatus.completed)
+            db.add(job)
+            db.commit()
+            job_id = job.id
+
+        resp = client.post(f"/jobs/{job_id}/resume")
+        assert resp.status_code == 400
+
+
+def test_resume_endpoint_clones_a_paused_jobs_params():
+    from app.db import SessionLocal
+    from app.models import Job, JobStatus, JobType
+
+    with TestClient(app) as client:
+        with SessionLocal() as db:
+            job = Job(job_type=JobType.write, params={"source_path": "/tmp/x"},
+                     status=JobStatus.paused)
+            db.add(job)
+            db.commit()
+            job_id = job.id
+
+        resp = client.post(f"/jobs/{job_id}/resume", follow_redirects=False)
+        assert resp.status_code == 303
+        clone_id = int(resp.headers["location"].rsplit("/", 1)[-1])
+        assert clone_id != job_id
+
+        with SessionLocal() as db:
+            clone = db.get(Job, clone_id)
+            assert clone.status == JobStatus.queued
+            assert clone.params == {"source_path": "/tmp/x"}

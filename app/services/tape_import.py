@@ -106,11 +106,6 @@ def _slot_of(barcode: str) -> int:
     return slot
 
 
-def _free_drives() -> list[int]:
-    state = get_hardware().library_status()
-    return [d.number for d in state.drives if d.loaded_barcode is None]
-
-
 def _register_archived(db: Session, barcode: str) -> int:
     """Bring a barcode into the catalog as 'archived' — never 'scratch' — so
     nothing can pick it up for a future write/format job, regardless of
@@ -350,17 +345,10 @@ def run_tape_import(
     if blocked:
         raise TapeImportError("refusing to import onto damaged/retired tapes: " + ", ".join(blocked))
 
-    # See the matching comment in app.services.batch_format.run_batch_format:
-    # when run through the job worker, claimed_drives is exactly what the
-    # drive-reservation registry already reserved for this job and must be
-    # used as-is — physical state alone can't distinguish "free" from
-    # "reserved for a different concurrently-running job that hasn't loaded
-    # a tape onto it yet". Called directly (no worker, e.g. tests) still
-    # falls back to discovering free drives itself.
-    if claimed_drives is not None:
-        drives = sorted(claimed_drives)[: len(barcodes)]
-    else:
-        drives = _free_drives()[: len(barcodes)]
+    # See lib.resolve_drives: when run through the job worker, claimed_drives
+    # is exactly what the drive-reservation registry already reserved for
+    # this job and must be used as-is, not rediscovered here.
+    drives = lib.resolve_drives(claimed_drives, len(barcodes))
     if not drives:
         raise TapeImportError("no free drives available")
 

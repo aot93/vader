@@ -302,3 +302,88 @@ def test_healthy_ingest_connection_appears_as_write_job_datalist_option(client):
     assert form.status_code == 200
     assert "WS22" in form.text
     assert 'list="known-sources"' in form.text
+
+
+# --- display_unit_name -------------------------------------------------------
+#
+# Regression coverage: the real backend's on-disk systemd unit filename is
+# derived independently (via `systemd-escape --path <mount_path>`) from
+# `Connection.unit_name`'s naive hostname slug — they only happen to agree
+# for hostnames with no dots/hyphens/uppercase. The Connection detail page
+# used to show the naive slug unconditionally, so `systemctl status
+# <shown-name>.mount` returned "unit not found" for most real hostnames.
+
+
+def test_systemd_backends_display_unit_name_matches_systemd_escape():
+    from app.mounts import ConnectionSpec
+    from app.mounts.systemd_backend import SystemdMountBackend
+
+    spec = ConnectionSpec(
+        hostname="nas-01.local", share="Projects", mount_path="/mnt/vader/nas-01.local",
+        credentials_path="/tmp/x.creds", unit_name=unit_name_for("nas-01.local"),
+        smb_version="3.0", domain=None, username="op",
+    )
+    shown = SystemdMountBackend().display_unit_name(spec)
+    # the naive slug and the real systemd-escaped name diverge for exactly
+    # the kind of hostname (hyphen + dot) this bug was found on
+    assert shown != spec.unit_name
+    assert shown == "mnt-vader-nas\\x2d01.local"
+
+
+def test_connection_manager_display_unit_name_uses_the_active_backend(monkeypatch):
+    from app.mounts.systemd_backend import SystemdMountBackend
+
+    connection = Connection(
+        hostname="nas-01.local", share="Projects", purpose=ConnectionPurpose.ingest,
+        mount_path="/mnt/vader/nas-01.local", credentials_path="/tmp/x.creds",
+        unit_name=unit_name_for("nas-01.local"), smb_version="3.0", username="op",
+    )
+    monkeypatch.setattr(cm, "get_mount_backend", lambda: SystemdMountBackend())
+
+    shown = cm.display_unit_name(connection)
+    assert shown != connection.unit_name
+    assert shown == "mnt-vader-nas\\x2d01.local"
+
+
+def test_connection_manager_display_unit_name_falls_back_if_the_backend_cant_tell(monkeypatch):
+    from app.mounts import MountError
+
+    class _BrokenBackend:
+        def display_unit_name(self, spec):
+            raise MountError("systemd-escape not found — is this a systemd host?")
+
+    connection = Connection(
+        hostname="WS23", share="Projects", purpose=ConnectionPurpose.ingest,
+        mount_path="/mnt/vader/WS23", credentials_path="/tmp/x.creds",
+        unit_name=unit_name_for("WS23"), smb_version="3.0", username="op",
+    )
+    monkeypatch.setattr(cm, "get_mount_backend", lambda: _BrokenBackend())
+
+    shown = cm.display_unit_name(connection)
+    assert connection.unit_name in shown
+    assert "unable to confirm" in shown
+
+
+def test_connection_detail_page_shows_the_real_backends_unit_name(client, db, monkeypatch):
+    from app.mounts.systemd_backend import SystemdMountBackend, _systemd_escape_path
+
+    r = client.post("/connections", data={
+        "hostname": "nas-02.local", "share": "Projects", "username": "a", "password": "p",
+    }, follow_redirects=False)
+    connection_url = r.headers["location"]
+    connection_id = int(connection_url.rsplit("/", 1)[-1])
+    # created under the (simulator) backend active at creation time, so its
+    # mount_path is a simulator path, not "/mnt/vader/..." — derive the
+    # expected escaped name from that actual mount_path rather than
+    # hardcoding a real-backend-shaped path.
+    connection = db.get(Connection, connection_id)
+    expected = _systemd_escape_path(connection.mount_path)
+    naive_slug = connection.unit_name
+    assert expected != naive_slug  # the whole point: they diverge for this hostname
+
+    monkeypatch.setattr(cm, "get_mount_backend", lambda: SystemdMountBackend())
+
+    detail = client.get(connection_url)
+    assert detail.status_code == 200
+    assert f"{expected}.mount" in detail.text
+    assert f"{naive_slug}.mount" not in detail.text  # the old naive-slug value

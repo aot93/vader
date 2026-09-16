@@ -78,19 +78,25 @@ def _load_and_mount(db: Session, tape: Tape, drive: int, actor: str, job_id: int
     return hw.mount_ltfs(drive)
 
 
-def _unload(db: Session, drive: int, actor: str, job_id: int) -> None:
+def _unload(db: Session, drive: int, actor: str, job_id: int) -> list[str]:
+    """Returns any cleanup-failure warnings instead of swallowing them — a
+    failed unload used to be invisible on a job that otherwise reported
+    `completed`, leaving a tape stuck in the drive with no signal short of
+    an operator thinking to check the Events page."""
     hw = get_hardware()
+    warnings: list[str] = []
     try:
         hw.unmount_ltfs(drive)
-    except HardwareError:
-        pass
+    except HardwareError as exc:
+        warnings.append(f"failed to unmount: {exc}")
     # any free storage slot (resolved atomically, under the arm lock, inside
     # unload_tape itself)
     try:
         lib.unload_tape(db, None, drive, initiated_by=actor, job_id=job_id)
         db.commit()
-    except HardwareError:
-        pass
+    except HardwareError as exc:
+        warnings.append(f"failed to unload: {exc}")
+    return warnings
 
 
 def _build_checks(db: Session, tape: Tape, mount: Path) -> list[_Check]:
@@ -228,7 +234,7 @@ def run_verify(
             )
         db.commit()
     finally:
-        _unload(db, drive, actor, job_id)
+        cleanup_warnings = _unload(db, drive, actor, job_id)
         db.commit()
 
     result = {
@@ -238,6 +244,7 @@ def run_verify(
         "mismatches": mismatches,
         "read_errors": read_errors,
         "verified": not mismatches and not read_errors,
+        "cleanup_warnings": cleanup_warnings,
     }
     record_audit(db, actor=actor, action="verify.completed", entity_type="tape",
                  entity_id=barcode, detail=result)

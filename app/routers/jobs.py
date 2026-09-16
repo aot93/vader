@@ -210,3 +210,40 @@ def retry_job(job_id: int, db: Session = Depends(get_db)):
     clone = enqueue(db, job.job_type, job.params or {})
     db.commit()
     return RedirectResponse(f"/jobs/{clone.id}", status_code=303)
+
+
+@router.post("/{job_id}/pause")
+def pause_job(job_id: int, db: Session = Depends(get_db)):
+    """Cooperative stop, distinct from Cancel: the job's own checkpoint
+    finishes its normal cleanup and reports `paused` rather than
+    `cancelled`, so Resume (below) can pick back up. Write-only for now —
+    the checkpoint this relies on is only wired up in run_write, see
+    PLAN_tape_import_optimization.md."""
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="unknown job")
+    if job.job_type != JobType.write:
+        raise HTTPException(status_code=400, detail="pause is only supported for write jobs")
+    if job.status in (JobStatus.queued, JobStatus.running):
+        job.pause_requested = True
+        if job.status == JobStatus.queued:
+            job.status = JobStatus.paused
+    db.commit()
+    return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+
+@router.post("/{job_id}/resume")
+def resume_job(job_id: int, db: Session = Depends(get_db)):
+    """A thin `retry` alias for a `paused` job specifically — functionally
+    identical (clone params, re-enqueue, rely on the write pipeline's
+    placement-level idempotent skip to fast-forward past what's already
+    written), just so the UI/audit trail can say "resumed" rather than
+    "retried" for a job that didn't actually fail."""
+    job = db.get(Job, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="unknown job")
+    if job.status != JobStatus.paused:
+        raise HTTPException(status_code=400, detail="only a paused job can be resumed")
+    clone = enqueue(db, job.job_type, job.params or {})
+    db.commit()
+    return RedirectResponse(f"/jobs/{clone.id}", status_code=303)

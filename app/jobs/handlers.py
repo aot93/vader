@@ -20,12 +20,16 @@ CancelCb = Callable[[], bool]
 
 def dispatch(
     db: Session, job: Job, progress: ProgressCb, is_cancelled: CancelCb,
-    claimed_drives: frozenset[int] = frozenset(),
+    claimed_drives: frozenset[int] = frozenset(), is_paused: CancelCb | None = None,
 ) -> dict:
     params = dict(job.params or {})
 
     if job.job_type == JobType.write:
-        return run_write(db, job_id=job.id, progress=progress, is_cancelled=is_cancelled, **params)
+        # Pause is currently write-only (see PLAN_tape_import_optimization.md,
+        # "pause/resume control for running write jobs") — other job types'
+        # dispatch calls below don't take is_paused.
+        return run_write(db, job_id=job.id, progress=progress, is_cancelled=is_cancelled,
+                         is_paused=is_paused, **params)
 
     if job.job_type == JobType.verify:
         return run_verify(db, job_id=job.id, progress=progress, is_cancelled=is_cancelled, **params)

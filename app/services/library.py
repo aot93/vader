@@ -5,6 +5,8 @@ and §3.7, and the cached ``library_slots`` snapshot stays current.
 from __future__ import annotations
 
 import threading
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -30,6 +32,30 @@ from app.services.audit import record_audit
 # mattered once jobs could run concurrently). format_tape() does not need
 # this lock — mkltfs doesn't move the changer arm.
 _arm_lock = threading.Lock()
+
+# A live write job hit one MOVE MEDIUM SCSI error (Illegal Request, sense
+# 53/03) on the post-write unload — retrying the identical `mtx unload` by
+# hand seconds later succeeded immediately, confirming it was transient, not
+# a persistent fault or a code bug. `_move_with_retry` wraps just the
+# physical `hw.load()`/`hw.unload()` call so both directions get one bounded
+# retry before the caller's existing `HardwareError` handling (event
+# logging, job-result visibility) takes over — a general retry policy is
+# deliberately not the goal here, just absorbing one flaky arm move.
+_ARM_MOVE_ATTEMPTS = 2
+_ARM_MOVE_RETRY_DELAY_SECONDS = 2.0
+
+
+def _move_with_retry(move: Callable[[], None]) -> None:
+    last_exc: HardwareError | None = None
+    for attempt in range(1, _ARM_MOVE_ATTEMPTS + 1):
+        try:
+            move()
+            return
+        except HardwareError as exc:
+            last_exc = exc
+            if attempt < _ARM_MOVE_ATTEMPTS:
+                time.sleep(_ARM_MOVE_RETRY_DELAY_SECONDS)
+    raise last_exc
 
 
 def _now() -> datetime:
@@ -126,7 +152,7 @@ def load_tape(db: Session, slot: int, drive: int, *, initiated_by: str = "operat
         event = log_event(db, event_type=TapeEventType.load, tape_id=tape.id if tape else None,
                           slot_number=slot, drive_number=drive, initiated_by=initiated_by, job_id=job_id)
         try:
-            hw.load(slot, drive)
+            _move_with_retry(lambda: hw.load(slot, drive))
             sync_snapshot(db, hw.library_status())
             if tape:
                 tape.physical_location = f"drive {drive}"
@@ -159,7 +185,7 @@ def unload_tape(db: Session, slot: int | None, drive: int, *, initiated_by: str 
         event = log_event(db, event_type=TapeEventType.unload, tape_id=tape.id if tape else None,
                           slot_number=slot, drive_number=drive, initiated_by=initiated_by, job_id=job_id)
         try:
-            hw.unload(slot, drive)
+            _move_with_retry(lambda: hw.unload(slot, drive))
             sync_snapshot(db, hw.library_status())
             if tape:
                 tape.physical_location = f"slot {slot}"
@@ -230,3 +256,30 @@ def retire_tape(db: Session, barcode: str, *, reason: str = "", initiated_by: st
     log_event(db, event_type=TapeEventType.retire, tape_id=tape.id, initiated_by=initiated_by)
     record_audit(db, actor=initiated_by, action="tape.retire", entity_type="tape",
                  entity_id=barcode, detail={"reason": reason})
+
+
+def resolve_drives(claimed_drives: frozenset[int] | None, n: int) -> list[int]:
+    """Which drives ``batch_format``/``tape_import`` should actually use for
+    up to ``n`` tapes, fanning out across as many drives as they can get.
+    Lives here (not in ``app.jobs.drives``, the claim registry itself)
+    because both call sites already import this module, and importing
+    ``app.jobs.drives`` from a service pulls in the whole ``app.jobs``
+    package — which imports ``app.jobs.handlers``, which imports these same
+    services back — a real circular import, not just a style concern.
+
+    When run through the job worker, ``claimed_drives`` is exactly what the
+    registry already reserved for the job and must be used as-is — physical
+    state alone can't distinguish "free" from "reserved by a different
+    concurrently-running job that hasn't loaded a tape onto it yet" (a
+    concurrently-running write job claiming drive 0 leaves drive 0 looking
+    physically free right up until it actually calls ``load_tape()``).
+    Called directly with no worker (e.g. tests, or any future non-worker
+    caller), ``claimed_drives`` is ``None`` and this discovers currently-free
+    drives itself instead. Was duplicated verbatim (this exact branch, plus
+    each module's own private ``_free_drives()``) in
+    ``app.services.batch_format`` and ``app.services.tape_import``.
+    """
+    if claimed_drives is not None:
+        return sorted(claimed_drives)[:n]
+    state = get_hardware().library_status()
+    return sorted(d.number for d in state.drives if d.loaded_barcode is None)[:n]

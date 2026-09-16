@@ -318,6 +318,21 @@ Proposed fix:
 **Risk:** low. **Depends on:** nothing — orthogonal to items 1–5, safe to
 pick up independently.
 
+**Implemented:** `app.services.library._move_with_retry` wraps the physical
+`hw.load()`/`hw.unload()` call inside `load_tape`/`unload_tape` with one
+bounded retry (2 attempts, 2s apart) before the existing `HardwareError`
+handling (event logging, re-raise) takes over — one central place, both
+directions, no change to the TapeEvent contract (still exactly one event row
+per call, success or failure). Cleanup-unload swallowing fixed at all three
+call sites: `writer.py::_Drive.release()` now collects warnings onto
+`self.warnings`, surfaced as `result["cleanup_warnings"]`; `verification.py`'s
+`_unload()` returns its warnings the same way; `restore.py` folds them
+straight into the existing `problems` list, which already flips
+`RestoreRequest.status` to `failed` when non-empty — so a stuck-tape cleanup
+failure on restore now correctly fails the restore instead of hiding behind
+a `completed` job. Covered by `tests/test_library_arm_retry.py` and
+`tests/test_cleanup_visibility.py`.
+
 ## New feature request: pause/resume control for running write jobs
 
 Operator need: a way to stop a running write job on demand when the machine
@@ -412,3 +427,84 @@ guarantees by construction). **Depends on:** nothing on this list, but
 touches the same job-worker/drives-registry code item 3 just finished, so
 sequencing it after item 3 had time to settle (which it has) is sensible
 rather than incidental.
+
+**Implemented**, exactly as scoped to `write` above:
+- `JobStatus.paused` and `Job.pause_requested` (migration `c7563fc7a76d`).
+- The raise-vs-break bug is fixed: `run_write`'s checkpoint now does
+  `if is_cancelled() or is_paused(): break`, single checkpoint for both,
+  same placement-boundary spot every other job type already checks at.
+  A cancelled write job now correctly reaches `JobStatus.cancelled` instead
+  of `failed`.
+- `app.jobs.worker._make_pause` mirrors `_make_cancel`; `_run_job` checks
+  `is_paused()` (after `is_cancelled()`, which wins if somehow both were
+  requested) to set `JobStatus.paused` and still record the partial
+  `result`, then releases the drive claim via the existing `finally` —
+  unchanged from how every other terminal status already does it, so a
+  paused job holding a drive/tape hostage was never actually a risk once
+  the checkpoint itself was placement-boundary-only.
+- `is_paused` threads through `app.jobs.handlers.dispatch` only for
+  `JobType.write` — every other job type's `dispatch()` call is unchanged,
+  matching the scope note above.
+- `POST /jobs/{id}/pause` (write jobs only — 400 otherwise; a queued job
+  shortcuts straight to `paused`, mirroring `cancel_job`) and
+  `POST /jobs/{id}/resume` (rejects anything not `paused`; otherwise
+  identical to `retry_job` — clone params, re-enqueue) in
+  `app/routers/jobs.py`. UI: a "Pause" button next to "Request cancel" on a
+  running write job's detail page; "Resume" instead of the generic
+  "Re-run with same parameters" once `paused`.
+- No exhaustive-`JobStatus`-match call sites needed updating (checked
+  `app/routers/dashboard.py`'s active-jobs filter and the jobs-list status
+  pill — both fine as-is: a paused job isn't "active", and the pill CSS
+  keys off the same `warn`-styled class as `cancelled`/`interrupted`).
+
+Covered by `tests/test_write_pause_resume.py` (cancel-bug regression, pause,
+resume-completes-the-rest) and `tests/test_web.py` (pause/resume endpoint
+and button-visibility behavior).
+
+## Smaller findings from reviewing this whole branch's diff — all done
+
+Found reviewing `041f3d0..main` after items 1/2/3/5 landed. The
+silent-cleanup-swallow finding in that list was folded into the arm-retry
+work above instead of listed twice; the remaining four are implemented.
+
+1. **Stale unit name on the Connection detail page** — done.
+   `app/templates/connection_detail.html` displayed `connection.unit_name`
+   (the naive hostname slug from `app.mounts.base.unit_name_for`), but the
+   real on-disk systemd unit filename is produced independently by
+   `systemd-escape --path` in `app/mounts/systemd_backend.py::_unit_paths`.
+   **Implemented:** `MountBackend.display_unit_name(spec)` (default: the
+   naive `spec.unit_name`, unchanged for the simulator);
+   `SystemdMountBackend` overrides it to return the real
+   `systemd-escape`-derived name. `connection_manager.display_unit_name()`
+   calls it and falls back to the naive slug (with a note) if the backend
+   can't be asked (e.g. `systemd-escape` missing) rather than let the page
+   fail to render. The Connection detail route/template now show this
+   instead of the raw field. Covered by `tests/test_connections.py`.
+
+2. **Redundant `mtx status` calls per poll tick** — done.
+   `app/jobs/worker.py::_scan_and_start` called `drives.try_claim_for(job)`
+   once per queued job, each re-fetching `library_status()` — on real
+   hardware, one `mtx status` subprocess call per queued job per tick.
+   **Implemented:** `_scan_and_start` fetches `library_status()` once per
+   tick and threads it into every `try_claim_for`/`try_claim`/
+   `try_claim_any` call that tick (`state` is an optional param on all
+   three now — omit it for a one-off call, e.g. a test). Covered by
+   `tests/test_jobs_worker.py::test_scan_and_start_fetches_library_status_once_per_tick_not_per_queued_job`.
+
+3. **Duplicated drive-selection slicing** between `batch_format.py` and
+   `tape_import.py` — done. **Implemented:** factored into
+   `app.services.library.resolve_drives(claimed_drives, n)` — *not*
+   `app/jobs/drives.py` as originally suggested here, because importing
+   that from a service pulls in the whole `app.jobs` package (which imports
+   `app.jobs.handlers`, which imports these same services back — a real
+   circular import, caught while wiring this up, not just a style
+   preference). `library.py` is a module both call sites already import.
+   Covered by `tests/test_resolve_drives.py`.
+
+4. **`run_pending_jobs_inline`'s drain loop hard-capped at a fixed
+   iteration count** — done. **Implemented:** `max_jobs: int = 50` replaced
+   with `timeout: float = 30.0`; the drain loop now bounds real elapsed
+   time (`time.monotonic()`-based deadline) instead of a fixed number of
+   scan/sleep cycles, so a job that legitimately takes longer than the old
+   ~2.5s iteration budget no longer strands a still-queued job behind it.
+   Covered by `tests/test_jobs_worker.py::test_run_pending_jobs_inline_bounds_by_wall_time_not_iteration_count`.

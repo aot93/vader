@@ -68,7 +68,9 @@ def connection_detail(connection_id: int, request: Request, db: Session = Depend
     connection = db.get(Connection, connection_id)
     if not connection:
         raise HTTPException(status_code=404, detail="unknown connection")
-    return templates.TemplateResponse(request, "connection_detail.html", {"connection": connection})
+    return templates.TemplateResponse(request, "connection_detail.html", {
+        "connection": connection, "display_unit_name": cm.display_unit_name(connection),
+    })
 
 
 @router.post("/{connection_id}/recheck")

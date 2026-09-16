@@ -70,6 +70,11 @@ class _Drive:
         self.loaded_barcode: str | None = None
         self.mount: Path | None = None
         self._formatted: set[str] = set()
+        # Cleanup (unmount/unload) failures used to be silently swallowed
+        # here — a job could report `completed` while a tape sat stuck in
+        # the drive with nothing but a TapeEvent row hinting at it. Collect
+        # them instead so run_write can surface them on the job's own result.
+        self.warnings: list[str] = []
 
     def _slot_of(self, barcode: str) -> int:
         state = self.hw.library_status()
@@ -99,17 +104,18 @@ class _Drive:
     def release(self) -> None:
         if self.loaded_barcode is None:
             return
+        barcode = self.loaded_barcode
         try:
             self.hw.unmount_ltfs(self.n)
-        except HardwareError:
-            pass
+        except HardwareError as exc:
+            self.warnings.append(f"{barcode}: failed to unmount: {exc}")
         # return the tape to any free storage slot (resolved atomically,
         # under the arm lock, inside unload_tape itself)
         try:
             lib.unload_tape(self.db, None, self.n, initiated_by=self.actor, job_id=self.job_id)
             self.db.commit()
-        except HardwareError:
-            pass
+        except HardwareError as exc:
+            self.warnings.append(f"{barcode}: failed to unload: {exc}")
         self.loaded_barcode = None
         self.mount = None
 
@@ -245,6 +251,7 @@ def run_write(
     actor: str = "operator",
     progress: ProgressCb | None = None,
     is_cancelled: CancelCb | None = None,
+    is_paused: CancelCb | None = None,
 ) -> dict:
     settings = get_settings()
     readback = settings.write_readback_verify if readback_verify is None else readback_verify
@@ -256,6 +263,7 @@ def run_write(
         source_machine = source_machine or greedy_source
     progress = progress or (lambda *_: None)
     is_cancelled = is_cancelled or (lambda: False)
+    is_paused = is_paused or (lambda: False)
 
     root = Path(source_path)
     units = scan_source(
@@ -283,8 +291,17 @@ def run_write(
     drv = _Drive(db, drive, job_id, actor)
     try:
         for placement in alloc.placements:
-            if is_cancelled():
-                raise WriteError("cancelled by operator")
+            # Checked only between placements, never mid-copy/mid-hash —
+            # matches every other job type's checkpoint (restore/verify/
+            # tape_import/batch_format all `break` here too). `break`, not
+            # raise: this needs to run the normal post-loop finalization
+            # below on whatever's been written so far and return a result,
+            # the same way a genuine full completion does — raising used to
+            # skip straight past that into _run_job's failure handler, which
+            # is why a cancelled write job was actually reported `failed`
+            # rather than `cancelled` until this was fixed.
+            if is_cancelled() or is_paused():
+                break
             unit = unit_by_key[placement.unit_key]
             mount = drv.ensure(placement.barcode, needs_format=placement.needs_format)
             tape = db.scalar(select(Tape).where(Tape.id == placement.tape_id))
@@ -355,6 +372,7 @@ def run_write(
         "spanned_units": sorted(set(alloc.spanned_units)),
         "readback_mismatches": mismatches,
         "mode": mode,
+        "cleanup_warnings": drv.warnings,
     }
     record_audit(db, actor=actor, action="write.completed", detail=result)
     db.commit()

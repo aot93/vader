@@ -20,6 +20,12 @@
     {% if job.status.value in ['queued','running'] %}
     <form class="inline" method="post" action="/jobs/{{ job.id }}/cancel"><button class="danger">Request cancel</button></form>
     {% endif %}
+    {% if job.status.value == 'running' and job.job_type.value == 'write' %}
+    <form class="inline" method="post" action="/jobs/{{ job.id }}/pause"><button class="ghost">Pause</button></form>
+    {% endif %}
+    {% if job.status.value == 'paused' %}
+    <form class="inline" method="post" action="/jobs/{{ job.id }}/resume"><button class="ghost">Resume</button></form>
+    {% endif %}
     {% if job.status.value in ['failed','interrupted','cancelled','completed'] %}
     <form class="inline" method="post" action="/jobs/{{ job.id }}/retry"><button class="ghost">Re-run with same parameters</button></form>
     {% endif %}

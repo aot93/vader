@@ -53,6 +53,19 @@ def _spec_for(connection: Connection) -> ConnectionSpec:
     )
 
 
+def display_unit_name(connection: Connection) -> str:
+    """The unit basename to actually show an operator — on the real backend
+    this is the ``systemd-escape``-derived name, not the naive
+    ``connection.unit_name`` slug (see ``MountBackend.display_unit_name``).
+    Falls back to the naive slug, with a note, if the real backend can't be
+    asked right now (e.g. `systemd-escape` missing) — a page that fails to
+    render at all would be a worse outcome than a possibly-stale value."""
+    try:
+        return get_mount_backend().display_unit_name(_spec_for(connection))
+    except MountError:
+        return f"{connection.unit_name} (unable to confirm real unit name)"
+
+
 def create_connection(
     db: Session,
     *,

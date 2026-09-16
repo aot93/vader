@@ -273,3 +273,105 @@ def test_inline_helper_drains_jobs_that_only_become_startable_later(seeded, make
     db.expire_all()
     statuses = [db.get(Job, j.id).status for j in jobs]
     assert statuses == [JobStatus.completed] * 3, statuses
+
+
+def test_scan_and_start_fetches_library_status_once_per_tick_not_per_queued_job(
+    seeded, make_source, monkeypatch
+):
+    """Regression test: `_scan_and_start` used to call `drives.try_claim_for`
+    once per queued job, each of which re-fetched `library_status()` — on
+    real hardware that's a `mtx status` subprocess call, so N queued jobs
+    meant N redundant calls per ~1.5s tick for state that can't actually
+    change mid-tick (nothing physically moves until a claimed job's thread
+    starts, which happens after this whole scan)."""
+    from app.jobs.worker import JobWorker
+
+    hw = get_hardware()
+    real_status = hw.library_status
+    calls = {"n": 0}
+
+    def counting_status():
+        calls["n"] += 1
+        return real_status()
+
+    monkeypatch.setattr(hw, "library_status", counting_status)
+
+    db = seeded
+    a, b, c = _scratch_barcodes(db, 3)
+    jobs = []
+    for name, barcode, drive in [("A", a, 0), ("B", b, 1), ("C", c, 0)]:
+        src = make_source(name, frames=1, chunks=0, with_config=False)
+        jobs.append(enqueue(db, JobType.write, {
+            "source_path": str(src), "mode": "standard", "target_barcode": barcode, "drive": drive,
+        }))
+    db.commit()
+
+    worker = JobWorker()
+    # Don't actually start the claimed jobs' threads: they'd make their own
+    # (real, legitimate) library_status() calls once running, which would
+    # confound a count that's only about the scan-and-claim step itself.
+    monkeypatch.setattr(worker, "_start_job_thread", lambda job_id, claimed: None)
+
+    try:
+        started = worker._scan_and_start()
+
+        # job A (drive 0) and B (drive 1) claim successfully; C also wants
+        # drive 0, so it's still queued after this one tick — three claim
+        # attempts against the registry, but exactly one hardware fetch.
+        assert started == 2
+        assert calls["n"] == 1, (
+            f"expected exactly one library_status() call for the tick, got {calls['n']}"
+        )
+    finally:
+        # _start_job_thread was stubbed out, so nothing will ever call
+        # drives.release() for whatever this claimed — release it directly
+        # so this test doesn't leak a claim into whichever test runs next.
+        drives.release(drives.claimed())
+
+
+def test_run_pending_jobs_inline_bounds_by_wall_time_not_iteration_count(
+    seeded, make_source, monkeypatch
+):
+    """Regression test: an earlier version capped the drain loop at a fixed
+    50 scan iterations, each sleeping up to 0.05s while something ran —
+    ~2.5s of loop-sleep time regardless of how long a job actually took. A
+    second job blocked on the same drive as a slightly-longer-running first
+    job used to be abandoned as permanently `queued` within that one call,
+    with no error surfaced, once the iteration budget ran out. `timeout` now
+    bounds real elapsed time instead."""
+    import app.services.writer as writer_mod
+
+    real_sha256 = writer_mod.sha256_file
+
+    def slow_sha256(*args, **kwargs):
+        time.sleep(1.5)
+        return real_sha256(*args, **kwargs)
+
+    monkeypatch.setattr(writer_mod, "sha256_file", slow_sha256)
+
+    db = seeded
+    a, b = _scratch_barcodes(db, 2)
+    src_a = make_source("ProjA", frames=1, chunks=0, with_config=False)
+    src_b = make_source("ProjB", frames=1, chunks=0, with_config=False)
+    job_a = enqueue(db, JobType.write, {
+        "source_path": str(src_a), "mode": "standard", "target_barcode": a, "drive": 0,
+    })
+    job_b = enqueue(db, JobType.write, {
+        # same drive as A -> can't even claim until A finishes and releases it
+        "source_path": str(src_b), "mode": "standard", "target_barcode": b, "drive": 0,
+    })
+    db.commit()
+
+    # `timeout` is a real, respected bound, not effectively infinite: too
+    # short a budget to ever see A finish and free drive 0 for B.
+    run_pending_jobs_inline(timeout=0.2)
+    db.expire_all()
+    assert db.get(Job, job_b.id).status == JobStatus.queued
+
+    # A's readback-verified single frame costs ~2 slowed sha256 calls (~3s),
+    # comfortably past the old fixed budget's ~2.5s of loop-sleep time — the
+    # default (generous, wall-clock) timeout must still drain both in one call.
+    run_pending_jobs_inline()
+    db.expire_all()
+    assert db.get(Job, job_a.id).status == JobStatus.completed, db.get(Job, job_a.id).error
+    assert db.get(Job, job_b.id).status == JobStatus.completed, db.get(Job, job_b.id).error

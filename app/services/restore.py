@@ -313,15 +313,15 @@ def run_restore(
             finally:
                 try:
                     hw.unmount_ltfs(drive)
-                except HardwareError:
-                    pass
+                except HardwareError as exc:
+                    problems.append(f"{t['barcode']}: failed to unmount: {exc}")
                 # any free storage slot (resolved atomically, under the arm
                 # lock, inside unload_tape itself)
                 try:
                     lib.unload_tape(db, None, drive, initiated_by=actor, job_id=job_id)
                     db.commit()
-                except HardwareError:
-                    pass
+                except HardwareError as exc:
+                    problems.append(f"{t['barcode']}: failed to unload: {exc}")
 
         req.status = RestoreStatus.completed if not problems else RestoreStatus.failed
         req.fulfilled_at = _now()

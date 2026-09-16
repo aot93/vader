@@ -12,7 +12,7 @@
   <tr><th>Share</th><td>{{ connection.share }}</td></tr>
   <tr><th>Mount path</th><td class="mono">{{ connection.mount_path }}</td></tr>
   <tr><th>Credentials file</th><td class="mono">{{ connection.credentials_path }}</td></tr>
-  <tr><th>Unit</th><td class="mono">{{ connection.unit_name }}.mount / .automount</td></tr>
+  <tr><th>Unit</th><td class="mono">{{ display_unit_name }}.mount / .automount</td></tr>
   <tr><th>SMB version</th><td>{{ connection.smb_version }}</td></tr>
   <tr><th>Username</th><td>{{ connection.username }}{% if connection.domain %} ({{ connection.domain }}){% endif %}</td></tr>
   <tr><th>Last checked</th><td>{{ connection.last_checked_at | dt }}</td></tr>

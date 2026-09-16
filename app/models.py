@@ -108,6 +108,12 @@ class JobStatus(str, enum.Enum):
     failed = "failed"
     cancelled = "cancelled"
     interrupted = "interrupted"
+    # Stopped on purpose, expected to be resumed (currently write jobs only)
+    # — distinct from `cancelled`, which is terminal-for-good. "Resuming"
+    # just re-enqueues a clone of the job's params (see POST
+    # /jobs/{id}/resume) and relies on the write pipeline's existing
+    # placement-level idempotent skip to fast-forward past what's done.
+    paused = "paused"
 
 
 class RestoreStatus(str, enum.Enum):
@@ -370,6 +376,7 @@ class Job(Base):
     result: Mapped[dict | None] = mapped_column(JSON)
     error: Mapped[str | None] = mapped_column(Text)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    pause_requested: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by: Mapped[str] = mapped_column(String(128), default="operator")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

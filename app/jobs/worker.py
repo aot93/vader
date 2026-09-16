@@ -32,6 +32,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 
 from app.db import session_scope
+from app.hardware import get_hardware
 from app.jobs import drives
 from app.jobs.handlers import dispatch
 from app.models import Job, JobStatus
@@ -62,6 +63,15 @@ def _make_cancel(job_id: int):
         with session_scope() as s:
             job = s.get(Job, job_id)
             return bool(job and job.cancel_requested)
+
+    return check
+
+
+def _make_pause(job_id: int):
+    def check() -> bool:
+        with session_scope() as s:
+            job = s.get(Job, job_id)
+            return bool(job and job.pause_requested)
 
     return check
 
@@ -128,13 +138,21 @@ class JobWorker(threading.Thread):
                 ).all()
             ]
 
+        # Fetched once per tick, not once per queued job: on real hardware
+        # library_status() shells out to `mtx status` (up to a 120s
+        # timeout), and drive occupancy can't change *during* this loop
+        # anyway — every claim attempt below reconciling against a state
+        # fetched N times over was N-1 redundant subprocess calls for the
+        # same answer.
+        state = get_hardware().library_status()
+
         started = 0
         for job_id in queued_ids:
             with session_scope() as s:
                 job = s.get(Job, job_id)
                 if job is None or job.status != JobStatus.queued:
                     continue  # claimed/changed by a concurrent pass already
-                claimed = drives.try_claim_for(job)
+                claimed = drives.try_claim_for(job, state)
                 if claimed is None:
                     continue
                 job.status = JobStatus.running
@@ -157,15 +175,22 @@ class JobWorker(threading.Thread):
     def _run_job(self, job_id: int, claimed: set[int]) -> None:
         progress = _make_progress(job_id)
         is_cancelled = _make_cancel(job_id)
+        is_paused = _make_pause(job_id)
         try:
             try:
                 with session_scope() as s:
                     job = s.get(Job, job_id)
-                    result = dispatch(s, job, progress, is_cancelled, frozenset(claimed))
+                    result = dispatch(s, job, progress, is_cancelled, frozenset(claimed),
+                                      is_paused=is_paused)
                 with session_scope() as s:
                     job = s.get(Job, job_id)
+                    # cancel wins over pause if somehow both were requested —
+                    # cancel is the terminal-for-good action.
                     if is_cancelled():
                         job.status = JobStatus.cancelled
+                    elif is_paused():
+                        job.status = JobStatus.paused
+                        job.result = result
                     else:
                         job.status = JobStatus.completed
                         job.result = result
@@ -206,15 +231,28 @@ def stop_worker() -> None:
         _worker = None
 
 
-def run_pending_jobs_inline(max_jobs: int = 50) -> None:
+def run_pending_jobs_inline(timeout: float = 30.0) -> None:
     """Test / CLI helper: run queued jobs synchronously (from the caller's
     point of view — internally still concurrent per drive) in the current
     process. Alternates "start everything currently startable" with "wait
     briefly for something to finish", since a drive-blocked job only
-    becomes startable once an earlier one releases its claim."""
+    becomes startable once an earlier one releases its claim.
+
+    Bounded by wall-clock time, not a fixed iteration count: an earlier
+    version capped at 50 scan iterations (each waiting up to 0.05s while
+    something ran) regardless of elapsed time — fine against the fast
+    simulator this is normally used with, but it would silently give up
+    mid-drain, leaving a still-queued job queued forever with no error
+    surfaced, the moment total run time exceeded that ~2.5s budget (e.g.
+    this helper pointed at slower, real-hardware-timed work). `timeout`
+    bounds actual elapsed time instead, so a job that's genuinely still
+    running (not stalled) never gets starved just because a lot of
+    scan/sleep cycles happened along the way.
+    """
     worker = JobWorker()
     worker._recover_interrupted()
-    for _ in range(max_jobs):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         started = worker._scan_and_start()
         if started == 0 and not worker._has_running():
             break

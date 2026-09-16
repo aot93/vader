@@ -90,6 +90,11 @@ class SystemdMountBackend(MountBackend):
     def mount_root(self) -> Path:
         return Path(get_settings().smb_mount_base)
 
+    def display_unit_name(self, spec: ConnectionSpec) -> str:
+        # The real unit basename, same derivation _unit_paths uses — not
+        # spec.unit_name (see that field's docstring in app/mounts/base.py).
+        return _systemd_escape_path(spec.mount_path)
+
     def provision(self, spec: ConnectionSpec, password: str) -> None:
         cred_path = Path(spec.credentials_path)
         try:

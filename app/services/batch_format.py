@@ -45,11 +45,6 @@ def _slot_of(barcode: str) -> int:
     return slot
 
 
-def _free_drives() -> list[int]:
-    state = get_hardware().library_status()
-    return [d.number for d in state.drives if d.loaded_barcode is None]
-
-
 def run_batch_format(
     db: Session,
     *,
@@ -83,20 +78,10 @@ def run_batch_format(
                 "refusing to format non-scratch tapes without force: " + ", ".join(not_scratch)
             )
 
-    # When run through the job worker, claimed_drives is exactly what the
-    # drive-reservation registry (app.jobs.drives) already reserved for this
-    # job — must be used as-is, not rediscovered here. Physical state alone
-    # (_free_drives()) can't tell "free" from "reserved for a different job
-    # that hasn't loaded a tape onto it yet", which is exactly the situation
-    # once two jobs can run concurrently: a concurrently-running write job
-    # claiming drive 0 leaves drive 0 looking physically free right up until
-    # it actually calls load_tape(), and _free_drives() would happily hand
-    # this job that same "free" drive too. Called directly (no worker, e.g.
-    # tests) still falls back to discovering free drives itself.
-    if claimed_drives is not None:
-        drives = sorted(claimed_drives)[: len(barcodes)]
-    else:
-        drives = _free_drives()[: len(barcodes)]
+    # See lib.resolve_drives: when run through the job worker, claimed_drives
+    # is exactly what the drive-reservation registry already reserved for
+    # this job and must be used as-is, not rediscovered here.
+    drives = lib.resolve_drives(claimed_drives, len(barcodes))
     if not drives:
         raise BatchFormatError("no free drives available")
 
