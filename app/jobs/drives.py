@@ -67,7 +67,12 @@ def drive_need(job: Job) -> DriveNeed:
 
 
 def _physically_free(state: LibraryState) -> set[int]:
-    return {d.number for d in state.drives if d.loaded_barcode is None}
+    # Not `d.loaded_barcode is None` — a drive holding a tape with a
+    # blank/unreadable barcode label also has no VolumeTag, which is
+    # indistinguishable from empty if occupancy is inferred from barcode
+    # alone. See the identical fix/rationale in
+    # app.services.library.unload_tape for the storage-slot version of this.
+    return {d.number for d in state.drives if not d.occupied}
 
 
 def try_claim(drives: set[int], state: LibraryState | None = None) -> bool:

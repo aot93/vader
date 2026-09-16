@@ -79,6 +79,7 @@ class RealHardware(TapeHardware):
                 drives.append(DriveState(
                     number=num, device=self._drive_device(num) if num < len(self.drives) else "?",
                     loaded_barcode=barcode, loaded_from_slot=from_slot,
+                    occupied=(m.group(2) == "Full"),
                 ))
                 continue
             m = re.match(r"\s*Storage Element (\d+)(\s+IMPORT/EXPORT)?:(Empty|Full)(.*)", line)
@@ -93,6 +94,7 @@ class RealHardware(TapeHardware):
                     number=num, barcode=barcode or None,
                     is_cleaning_tape=bool(barcode and barcode.upper().startswith("CLN")),
                     kind="import_export" if is_ie else "storage",
+                    occupied=(m.group(3) == "Full"),
                 ))
         return LibraryState(changer_device=self.changer, slots=slots, drives=drives)
 

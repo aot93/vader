@@ -102,7 +102,8 @@ class SimulatedHardware(TapeHardware):
         with self._state_lock:
             slots = [
                 SlotState(number=s["number"], barcode=s["barcode"],
-                          is_cleaning_tape=s["is_cleaning_tape"], kind=s.get("kind", "storage"))
+                          is_cleaning_tape=s["is_cleaning_tape"], kind=s.get("kind", "storage"),
+                          occupied=s["barcode"] is not None)
                 for s in self._state["slots"]
             ]
             drives = []
@@ -112,6 +113,7 @@ class SimulatedHardware(TapeHardware):
                     number=d["number"], device=f"sim:/dev/nst{d['number']}",
                     loaded_barcode=d["loaded_barcode"], loaded_from_slot=d["loaded_from_slot"],
                     mount_point=str(mp) if mp else None, activity=d["activity"],
+                    occupied=d["loaded_barcode"] is not None,
                 ))
             return LibraryState(changer_device="sim:/dev/sg-changer", slots=slots, drives=drives)
 

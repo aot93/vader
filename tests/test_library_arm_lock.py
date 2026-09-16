@@ -134,3 +134,47 @@ def test_concurrent_unload_tape_any_free_slot_never_collides(seeded):
     # both tapes landed in *different* slots, not the same one
     occupied = [s.number for s in state.slots if s.barcode is not None]
     assert len(occupied) == len(set(occupied))
+
+
+def test_unload_tape_skips_a_slot_with_an_unreadable_barcode_label(seeded, monkeypatch):
+    """Direct regression test for a bug caught live: `mtx status` reports
+    Empty/Full per storage element independent of whether the barcode label
+    was readable — a slot holding a tape with a blank/unreadable barcode
+    still shows no VolumeTag, which is indistinguishable from a genuinely
+    empty slot if occupancy is inferred from barcode alone.
+    unload_tape(slot=None)'s "any free slot" search used to do exactly that
+    (`s.barcode is None`), picked such a slot, and failed for real against
+    the physical changer with "Storage Element N is Already Full" — leaving
+    the tape stuck in the drive and every job after it cascading into
+    "Drive Full" failures. It must now use `occupied` instead, which the
+    real backend derives straight from mtx's Empty/Full token."""
+    hw = get_hardware()
+    real_status = hw.library_status
+
+    # Free slots 1 and 2 by loading their tapes into the two sim drives.
+    with session_scope() as s:
+        lib.load_tape(s, 1, 0)
+    with session_scope() as s:
+        lib.load_tape(s, 2, 1)
+
+    def fake_status():
+        # Simulate slot 1's tape label being unreadable: still physically
+        # occupied (mtx would report it Full), but no VolumeTag — exactly
+        # what a genuinely empty slot also looks like if you only check
+        # `barcode is None`.
+        state = real_status()
+        slot_1 = state.slot(1)
+        slot_1.barcode = None
+        slot_1.occupied = True
+        return state
+
+    monkeypatch.setattr(hw, "library_status", fake_status)
+
+    with session_scope() as s:
+        lib.unload_tape(s, None, 0)
+
+    landed_slot = real_status().find_barcode_slot("TEST001L8")
+    assert landed_slot == 2, (
+        f"expected the drive-0 tape back in the only genuinely free slot (2), "
+        f"landed in {landed_slot} instead"
+    )

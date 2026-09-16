@@ -37,6 +37,14 @@ class DriveState:
     loaded_from_slot: int | None = None
     mount_point: str | None = None
     activity: str = "idle"  # idle | reading | writing
+    # Physical occupancy, independent of whether a barcode label was
+    # readable. `mtx status` reports Empty/Full for an element regardless of
+    # VolumeTag — a loaded tape with a blank/unreadable label is still Full,
+    # so `loaded_barcode is None` alone cannot tell "empty" from "occupied by
+    # an unlabelled tape". Real backend sets this from the Empty/Full token
+    # directly; simulated tapes always have a known barcode, so there
+    # `occupied == (loaded_barcode is not None)`.
+    occupied: bool = False
 
 
 @dataclass
@@ -45,6 +53,8 @@ class SlotState:
     barcode: str | None = None
     is_cleaning_tape: bool = False
     kind: str = "storage"  # storage | import_export
+    # Same rationale as DriveState.occupied — see there.
+    occupied: bool = False
 
 
 @dataclass

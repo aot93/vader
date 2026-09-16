@@ -176,7 +176,14 @@ def unload_tape(db: Session, slot: int | None, drive: int, *, initiated_by: str 
         hw = get_hardware()
         state = hw.library_status()
         if slot is None:
-            slot = next((s.number for s in state.slots if s.barcode is None), None)
+            # Not `s.barcode is None`: a slot holding a tape whose barcode
+            # label is blank/unreadable also reports no VolumeTag, which
+            # looks identical to a genuinely empty slot if occupancy is
+            # inferred from barcode alone — confirmed live via `mtx status`
+            # reporting a target slot "Already Full" after this picked it as
+            # "free". `occupied` comes straight from mtx's Empty/Full token,
+            # independent of whether the barcode was readable.
+            slot = next((s.number for s in state.slots if not s.occupied), None)
             if slot is None:
                 raise HardwareError("no free storage slot to return the tape to")
         drive_state = state.drive(drive)
