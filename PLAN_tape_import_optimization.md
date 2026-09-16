@@ -317,3 +317,98 @@ Proposed fix:
 4 call sites for consistent visibility is the rest of the work).
 **Risk:** low. **Depends on:** nothing — orthogonal to items 1–5, safe to
 pick up independently.
+
+## New feature request: pause/resume control for running write jobs
+
+Operator need: a way to stop a running write job on demand when the machine
+or the network needs its capacity back for something more critical — without
+throwing away the job's progress. Not the same as Cancel (`POST
+/jobs/{id}/cancel`, `Job.cancel_requested`), which today is a terminal,
+"this job is done, for good" action.
+
+**The good news: the write pipeline is already idempotent at placement
+granularity**, and this makes "pause" mostly a UI/status-labeling problem
+rather than a resumability problem. `_write_sequence_part`/`_write_file_part`
+in `app/services/writer.py` already skip any placement whose span row is
+already `written_at` (and `verified_at`, if readback is on) — that's the
+existing crash-recovery contract ("a network blip or VM restart mid-run is
+recoverable by simply starting the job again," per the module's own
+docstring). `POST /jobs/{id}/retry` already clones a job's `job_type` +
+`params` and re-enqueues it — run that against a write job that stopped
+partway through, and it naturally fast-forwards past everything already
+written and picks up at the next un-written placement. Pause doesn't need
+new resumption machinery; it needs a clean, cooperative way to *stop*, and a
+status that says "stopped on purpose, expects to be resumed" rather than
+"failed."
+
+**A real inconsistency this surfaces, specific to write jobs:** every other
+job type's cancellation checkpoint returns gracefully —
+`app/services/restore.py:290`, `verification.py:171`, `tape_import.py:386`,
+and `batch_format.py:121` all do `if is_cancelled(): break`, finish their
+normal cleanup, and return a result — which is what lets `JobWorker._run_job`
+correctly set `job.status = JobStatus.cancelled` (it only takes that branch
+when `dispatch()` *returns*, checking `is_cancelled()` after the fact).
+`writer.py`'s checkpoint (line 286) instead does
+`if is_cancelled(): raise WriteError("cancelled by operator")` — which
+propagates out of `dispatch()` into `_run_job`'s `except Exception` handler,
+so **a cancelled write job today is actually marked `failed`**, with
+"cancelled by operator" as its error text, never reaching the `cancelled`
+branch at all. This needs fixing as part of adding pause, not just for
+pause's sake — `run_write` should `break` out of its placement loop (like
+every other job type already does) rather than raise, running its existing
+post-loop finalization (`_finalise_tape` for whatever's been written so far)
+on the partial result instead of skipping straight to `finally: drv.release()`.
+
+Design sketch:
+- **Data model:** add `JobStatus.paused` (alongside the existing
+  `queued`/`running`/`completed`/`failed`/`cancelled`/`interrupted`), and a
+  `Job.pause_requested: bool` column mirroring `cancel_requested`. Small
+  migration, same shape as `bfc167b72cb8_tape_last_scanned_at`.
+- **Checkpoint:** thread an `is_paused()` callback through `run_write`
+  alongside `is_cancelled()` (same `_make_cancel`-style factory in
+  `app/jobs/worker.py`), checked at the same point as the cancel check —
+  between placements, never mid-copy or mid-hash. That's a real limitation
+  worth stating plainly: a placement already in flight (one very large
+  single file, say) finishes before the pause takes effect. Matches how
+  cancellation already behaves for every job type, so it's a consistent,
+  understood tradeoff rather than a new one.
+- **On pause:** `break` out of the loop (fixing the raise-vs-break
+  inconsistency above along the way), run the existing finalize/catalog-CSV
+  steps for whatever's actually been written, then let the existing
+  `finally: drv.release(); db.commit()` return the tape to its slot and
+  release the drive claim (`drives.release(claimed)` in
+  `JobWorker._run_job`'s `finally`) — a paused job must not sit there holding
+  a drive and a physical tape hostage, since freeing exactly that kind of
+  resource is the entire point.
+- **API:** `POST /jobs/{id}/pause`, mirroring `cancel_job` in
+  `app/routers/jobs.py` — sets `pause_requested=True` for a `running` job; a
+  still-`queued` job can transition straight to `paused` with nothing to
+  checkpoint (same shortcut `cancel_job` already takes for queued jobs).
+- **Resume:** no new endpoint strictly required — `POST /jobs/{id}/retry`
+  already does exactly the right thing (clone params, re-enqueue, rely on
+  idempotent skip). Worth a thin `/jobs/{id}/resume` alias anyway, purely so
+  the UI/audit log can say "resumed" instead of "retried" for a job that
+  didn't actually fail — cosmetic, not functional.
+- **UI:** a "Pause" button next to "Request cancel" on the job detail page
+  while `running`; a paused job's page shows "Resume" instead of the
+  generic "Retry" a failed job gets.
+- **Scope note:** everything above is written against `write` specifically,
+  since that's what was asked for, but the mechanism generalizes cleanly to
+  `verify`/`restore`/`tape_import`/`batch_format` too — they already use the
+  correct `break`-based checkpoint, so adding `is_paused()` next to their
+  existing `is_cancelled()` check is a smaller change for those than the
+  write-specific raise-vs-break fix above.
+
+**Effort:** medium (the raise-vs-break fix and the pause/resume plumbing are
+each individually small; auditing every call site that reads `job.status`
+for an exhaustive enum match — e.g. dashboard filters, any "job types
+currently blocking a drive" logic — for the new `paused` value is the part
+likely to have sharp edges). **Risk:** low-medium (mostly additive; the one
+real risk is a job that's paused while genuinely mid-formatting a tape via
+`mkltfs`, which cannot be safely interrupted — worth an explicit check that
+pause is only honored between placements, never during `_Drive.ensure()`'s
+format/mount step, which the placement-boundary checkpoint above already
+guarantees by construction). **Depends on:** nothing on this list, but
+touches the same job-worker/drives-registry code item 3 just finished, so
+sequencing it after item 3 had time to settle (which it has) is sensible
+rather than incidental.
