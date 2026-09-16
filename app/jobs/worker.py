@@ -98,7 +98,19 @@ class JobWorker(threading.Thread):
     def run(self) -> None:
         self._recover_interrupted()
         while not self._stop_event.is_set():
-            started = self._scan_and_start()
+            try:
+                started = self._scan_and_start()
+            except Exception:
+                # A transient hardware error here (e.g. `mtx status` timing
+                # out) must not kill this thread — it's the *only* thing
+                # that ever starts a queued job. Before this was caught, one
+                # bad tick permanently stopped all job processing until the
+                # next service restart, silently: nothing but the systemd
+                # journal ("Exception in thread vader-job-worker") showed
+                # it, and every job submitted afterwards just sat in
+                # 'queued' forever. Log and retry next tick instead.
+                traceback.print_exc()
+                started = 0
             if not started:
                 time.sleep(_POLL_SECONDS)
 

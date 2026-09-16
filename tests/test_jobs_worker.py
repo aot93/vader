@@ -329,6 +329,49 @@ def test_scan_and_start_fetches_library_status_once_per_tick_not_per_queued_job(
         drives.release(drives.claimed())
 
 
+def test_worker_survives_a_transient_scan_error(seeded, make_source, monkeypatch):
+    """Regression test: an uncaught exception inside `_scan_and_start` (e.g.
+    a real `mtx status` timeout) used to propagate out of `run()`'s while
+    loop and silently kill the whole background thread — every job
+    submitted afterwards sat in 'queued' forever until the service was
+    restarted. One bad tick must not stop the worker."""
+    from app.jobs.worker import JobWorker
+
+    db = seeded
+    barcode = _scratch_barcodes(db, 1)[0]
+    src = make_source("ProjA", frames=1, chunks=0, with_config=False)
+    job = enqueue(db, JobType.write, {
+        "source_path": str(src), "mode": "standard", "target_barcode": barcode, "drive": 0,
+    })
+    db.commit()
+
+    worker = JobWorker()
+    real_scan = worker._scan_and_start
+    calls = {"n": 0}
+
+    def flaky_scan():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("simulated transient hardware error")
+        return real_scan()
+
+    monkeypatch.setattr(worker, "_scan_and_start", flaky_scan)
+    worker.start()
+    try:
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            db.expire_all()
+            if db.get(Job, job.id).status == JobStatus.completed:
+                break
+            time.sleep(0.05)
+        assert worker.is_alive(), "worker thread died after a transient scan error"
+        assert _job_status(db, job) == JobStatus.completed
+        assert calls["n"] >= 2, "worker never retried after the simulated failure"
+    finally:
+        worker.stop()
+        worker.join(timeout=5)
+
+
 def test_run_pending_jobs_inline_bounds_by_wall_time_not_iteration_count(
     seeded, make_source, monkeypatch
 ):
