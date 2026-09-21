@@ -295,7 +295,8 @@ def run_write(
             before = len(mismatches)
             if isinstance(unit, SequenceUnit):
                 span = _write_sequence_part(
-                    db, unit, placement, mount, root, readback, mismatches, drv.n
+                    db, unit, placement, mount, root, readback, mismatches, drv.n,
+                    progress, done_bytes, total_bytes,
                 )
             else:
                 span = _write_file_part(
@@ -374,6 +375,9 @@ def _write_sequence_part(
     readback: bool,
     mismatches: list[str],
     drive_n: int,
+    progress: ProgressCb,
+    done_bytes: int,
+    total_bytes: int,
 ) -> ContentTapeSpan:
     container = _upsert_sequence(db, unit)
     existing = _existing_span(
@@ -395,7 +399,15 @@ def _write_sequence_part(
     frames = placement.frames or []
     seq_dir_rel = _ltfs_relpath(root, Path(unit.source_path))
     checksums: list[FrameChecksum] = []
-    for fr in frames:
+    # A sequence is one placement, and the outer loop in run_write() only
+    # calls `progress` once the *whole* placement finishes — fine for a
+    # handful of small files, but a single sequence can be hundreds of
+    # multi-GB frames, which made a job doing real work at good throughput
+    # look identical to a hung one (confirmed live: ~7 minutes of an
+    # apparently frozen progress bar while actually copying a 14GB/378-frame
+    # sequence at full speed). Report progress after every frame instead.
+    frame_bytes_done = 0
+    for i, fr in enumerate(frames, start=1):
         rel = _ltfs_relpath(root, fr.path)
         dst = mount / rel
         digest = copy_and_hash(fr.path, dst)
@@ -403,6 +415,10 @@ def _write_sequence_part(
             msg = f"{unit_key(unit)}::{fr.filename}"
             mismatches.append(msg)
         checksums.append(FrameChecksum(filename=fr.filename, frame=fr.frame, size=fr.size, sha256=digest))
+        frame_bytes_done += fr.size
+        progress(done_bytes + frame_bytes_done, total_bytes,
+                 f"{placement.barcode}: {unit_key(unit)} part {placement.part_index + 1}/"
+                 f"{placement.part_count} — frame {i}/{len(frames)}")
 
     # sidecar manifest — parallel _manifests/ path, never inside the shot folder.
     # Each tape carries a manifest for the frames it holds (self-describing);
