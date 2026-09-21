@@ -47,7 +47,24 @@ def timeago(dt: datetime | None) -> str:
     return f"{secs // 86400}d ago"
 
 
+def format_duration(seconds: int | None) -> str:
+    if seconds is None:
+        return "—"
+    seconds = max(0, int(seconds))
+    days, seconds = divmod(seconds, 86400)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+    if days:
+        return f"{days}d {hours}h"
+    if hours:
+        return f"{hours}h {minutes}m"
+    if minutes:
+        return f"{minutes}m {seconds}s"
+    return f"{seconds}s"
+
+
 templates.env.filters["bytes"] = format_bytes
+templates.env.filters["duration"] = format_duration
 templates.env.filters["dt"] = format_dt
 templates.env.filters["timeago"] = timeago
 templates.env.globals["now"] = lambda: datetime.now(UTC)

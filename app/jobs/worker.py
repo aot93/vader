@@ -44,16 +44,53 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+# Exponential moving average, not a plain since-start rate: a job can spend
+# its first few minutes on setup (mounting/formatting a fresh tape) before
+# any bytes move, which drags a since-start average down for a long time
+# after it's actually running at full speed. Recomputed on every call, so it
+# also self-corrects after a genuine stall.
+_RATE_EMA_ALPHA = 0.3
+# Below this gap between samples, a delta/dt division is too noisy to trust
+# (or resuming a paused job replays its idempotent skip-check across
+# thousands of already-written placements in a burst of sub-second calls —
+# confirmed live: 24,770 units re-checked in under a second on resume).
+_RATE_MIN_SAMPLE_SECONDS = 0.5
+# Sanity ceiling, not a real hardware limit (LTO-9 tops out near 400MB/s) --
+# guards against that same resume burst producing one call whose dt clears
+# the threshold above but whose delta still spans a huge chunk of
+# already-written data, which would otherwise spike the EMA into a bogus ETA.
+_RATE_MAX_PLAUSIBLE_BYTES_PER_SEC = 1_000_000_000
+
+
 def _make_progress(job_id: int):
     def cb(current: int, total: int, message: str = "") -> None:
+        now = _utcnow()
         with session_scope() as s:
             job = s.get(Job, job_id)
             if job is None:
                 return
+            prev_bytes, prev_at = job.progress_current, job.heartbeat_at
+            if prev_at is not None and prev_at.tzinfo is None:
+                # SQLite (tests / SQLite-mode dev) drops tzinfo on round-trip;
+                # Postgres doesn't. Normalize rather than let the subtraction
+                # below blow up with "can't subtract offset-naive and
+                # offset-aware datetimes" on every progress() call.
+                prev_at = prev_at.replace(tzinfo=UTC)
+            if prev_at is not None and current > prev_bytes:
+                dt = (now - prev_at).total_seconds()
+                if dt >= _RATE_MIN_SAMPLE_SECONDS:
+                    instant_rate = min(
+                        (current - prev_bytes) / dt, _RATE_MAX_PLAUSIBLE_BYTES_PER_SEC
+                    )
+                    job.progress_rate_bytes_per_sec = (
+                        instant_rate if job.progress_rate_bytes_per_sec is None
+                        else _RATE_EMA_ALPHA * instant_rate
+                        + (1 - _RATE_EMA_ALPHA) * job.progress_rate_bytes_per_sec
+                    )
             job.progress_current = int(current)
             job.progress_total = int(total)
             job.progress_message = (message or "")[:500]
-            job.heartbeat_at = _utcnow()
+            job.heartbeat_at = now
 
     return cb
 

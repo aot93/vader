@@ -24,6 +24,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -383,12 +384,28 @@ class Job(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Exponentially-smoothed bytes/sec, updated on every progress() call (see
+    # app.jobs.worker._make_progress) — not a plain since-start average,
+    # which stayed misleadingly low for a long time after a job spent its
+    # first few minutes on setup (mount/mkltfs a fresh tape) before any bytes
+    # moved, and stays misleadingly low again after a real stall (confirmed
+    # live: a 14GB/378-frame sequence placement that only reports progress
+    # once per *frame*, not per placement, still needs smoothing across
+    # those per-frame deltas or the figure jitters wildly between a tiny
+    # icon-sized frame and a multi-hundred-MB one).
+    progress_rate_bytes_per_sec: Mapped[float | None] = mapped_column(Float)
 
     @property
     def progress_pct(self) -> int:
         if not self.progress_total:
             return 0
         return min(int(self.progress_current * 100 / self.progress_total), 100)
+
+    @property
+    def eta_seconds(self) -> int | None:
+        if not self.progress_rate_bytes_per_sec or self.progress_total <= self.progress_current:
+            return None
+        return int((self.progress_total - self.progress_current) / self.progress_rate_bytes_per_sec)
 
 
 class AuditLog(Base):
