@@ -307,7 +307,7 @@ def _import_one_tape(
                 record_audit(s, actor=initiated_by, action="tape.import", entity_type="tape",
                             entity_id=barcode, detail={"units": n_units, "bytes": total_bytes, "verify": verify})
             except Exception as exc:  # noqa: BLE001 - record, then still unmount/unload
-                lib.finish_event(s, event, EventResult.error, str(exc))
+                lib.finish_event_error(s, event, exc)
                 raise
         return n_units
     finally:

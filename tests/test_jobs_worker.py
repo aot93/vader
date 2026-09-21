@@ -79,8 +79,10 @@ def test_jobs_on_different_drives_run_concurrently(seeded, make_source, monkeypa
 
     assert _job_status(db, job_a) == JobStatus.completed
     assert _job_status(db, job_b) == JobStatus.completed
-    # two frames each, readback verify on -> 2 sha256_file calls/frame; if
-    # the two jobs (different drives) ran genuinely concurrently, at least
+    # two frames each, readback verify on -> 1 sha256_file call/frame (the
+    # dst read-back-and-compare; the source-side hash is computed inline
+    # during the copy, not via sha256_file); if the two jobs (different
+    # drives) ran genuinely concurrently, at least
     # two of those calls overlapped in time.
     assert probe.max_concurrent >= 2, "jobs on different drives never actually overlapped"
 

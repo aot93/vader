@@ -75,6 +75,7 @@ class TapeEventType(str, enum.Enum):
     clean = "clean"
     retire = "retire"
     eject = "eject"
+    unlock = "unlock"
     import_tape = "import_tape"
 
 

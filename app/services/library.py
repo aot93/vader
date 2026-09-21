@@ -94,6 +94,19 @@ def finish_event(db: Session, event: TapeEvent, result: EventResult, error: str 
     db.flush()
 
 
+def finish_event_error(db: Session, event: TapeEvent, exc: Exception) -> None:
+    """Record the failure and commit it right away, independent of whatever
+    the caller's session does next. Without this, a HardwareError raised
+    straight through to a job's dispatch (format/clean/load/unload all do)
+    gets its entire session rolled back by the job worker's `session_scope`
+    before a separate session marks the *job* failed — silently erasing the
+    tape_events row that was supposed to explain why (confirmed live: a
+    failed format job left zero tape_events rows, only the job's own `error`
+    text survived)."""
+    finish_event(db, event, EventResult.error, str(exc))
+    db.commit()
+
+
 def sync_snapshot(db: Session, state: LibraryState) -> None:
     """Replace the cached library_slots rows from a fresh hardware state."""
     db.query(LibrarySlot).delete()
@@ -129,7 +142,7 @@ def refresh_inventory(db: Session, *, initiated_by: str = "operator") -> Library
                      detail={"slots": len(state.slots), "drives": len(state.drives)})
         return state
     except HardwareError as exc:
-        finish_event(db, event, EventResult.error, str(exc))
+        finish_event_error(db, event, exc)
         raise
 
 
@@ -158,7 +171,7 @@ def load_tape(db: Session, slot: int, drive: int, *, initiated_by: str = "operat
                 tape.physical_location = f"drive {drive}"
             finish_event(db, event, EventResult.success)
         except HardwareError as exc:
-            finish_event(db, event, EventResult.error, str(exc))
+            finish_event_error(db, event, exc)
             raise
 
 
@@ -198,8 +211,29 @@ def unload_tape(db: Session, slot: int | None, drive: int, *, initiated_by: str 
                 tape.physical_location = f"slot {slot}"
             finish_event(db, event, EventResult.success)
         except HardwareError as exc:
-            finish_event(db, event, EventResult.error, str(exc))
+            finish_event_error(db, event, exc)
             raise
+
+
+def unlock_drive(db: Session, drive: int, *, initiated_by: str = "operator") -> None:
+    """Clear a stuck SCSI PREVENT MEDIUM REMOVAL lock on ``drive`` (`mt
+    unlock`). Doesn't touch the changer arm, so doesn't need ``_arm_lock`` —
+    needed after an unclean shutdown (LTFS killed mid-mount) leaves the lock
+    set and the changer refusing to eject that drive's tape."""
+    hw = get_hardware()
+    state = hw.library_status()
+    drive_state = state.drive(drive)
+    barcode = drive_state.loaded_barcode if drive_state else None
+    tape = _tape_by_barcode(db, barcode) if barcode else None
+    event = log_event(db, event_type=TapeEventType.unlock, tape_id=tape.id if tape else None,
+                      drive_number=drive, initiated_by=initiated_by)
+    try:
+        hw.unlock_drive(drive)
+        finish_event(db, event, EventResult.success)
+        record_audit(db, actor=initiated_by, action="drive.unlock", detail={"drive": drive})
+    except HardwareError as exc:
+        finish_event_error(db, event, exc)
+        raise
 
 
 def clean_drive(db: Session, drive: int, cleaning_slot: int, *, initiated_by: str = "operator") -> None:
@@ -214,8 +248,33 @@ def clean_drive(db: Session, drive: int, cleaning_slot: int, *, initiated_by: st
             record_audit(db, actor=initiated_by, action="drive.clean",
                          detail={"drive": drive, "cleaning_slot": cleaning_slot})
         except HardwareError as exc:
-            finish_event(db, event, EventResult.error, str(exc))
+            finish_event_error(db, event, exc)
             raise
+
+
+def require_drive_loaded(state: LibraryState, drive: int, barcode: str) -> None:
+    """Raise unless ``barcode`` is physically loaded in ``drive`` right now.
+
+    ``format_tape`` (below it doesn't itself load anything — it formats
+    whatever is already sitting in the drive, same as an operator would
+    expect from "format the tape in drive N") used to skip straight to
+    ``mkltfs`` with no such check, so a barcode typed in without first using
+    Load (e.g. one still sitting in a storage slot) failed several seconds
+    later with a raw, confusing SCSI sense dump ("No medium present") instead
+    of a clear error naming the actual mistake. Used both as an immediate
+    form-level check (``do_format``) and again here in ``format_tape``
+    itself, so any other caller gets the same guard."""
+    drive_state = state.drive(drive)
+    if drive_state and drive_state.loaded_barcode == barcode:
+        return
+    if drive_state and drive_state.occupied:
+        detail = f"drive {drive} currently has {drive_state.loaded_barcode or 'an unreadable tape'} loaded"
+    else:
+        detail = f"drive {drive} is empty"
+    raise HardwareError(
+        f"{barcode} is not loaded in drive {drive} ({detail}) — "
+        f"load it into the drive first from the Library page, then format"
+    )
 
 
 def format_tape(db: Session, drive: int, barcode: str, *, force: bool = False,
@@ -230,6 +289,7 @@ def format_tape(db: Session, drive: int, barcode: str, *, force: bool = False,
             f"refusing to format without force"
         )
     hw = get_hardware()
+    require_drive_loaded(hw.library_status(), drive, barcode)
     event = log_event(db, event_type=TapeEventType.format, tape_id=tape.id if tape else None,
                       drive_number=drive, initiated_by=initiated_by, job_id=job_id)
     try:
@@ -249,7 +309,7 @@ def format_tape(db: Session, drive: int, barcode: str, *, force: bool = False,
         record_audit(db, actor=initiated_by, action="tape.format",
                      entity_type="tape", entity_id=barcode, detail={"force": force})
     except HardwareError as exc:
-        finish_event(db, event, EventResult.error, str(exc))
+        finish_event_error(db, event, exc)
         raise
 
 

@@ -9,7 +9,6 @@ restart mid-run is recoverable by simply starting the job again.
 """
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,7 +28,7 @@ from app.models import (
 )
 from app.services import library as lib
 from app.services.audit import record_audit
-from app.services.checksums import sha256_file
+from app.services.checksums import copy_and_hash, sha256_file
 from app.services.intake import FileUnit, IntakeRules, SequenceUnit, scan_source
 from app.services.manifests import (
     FrameChecksum,
@@ -166,19 +165,6 @@ def _ltfs_relpath(source_root: Path, path: Path) -> str:
     except ValueError:
         rel = Path(path.name)
     return "/".join(rel.parts)
-
-
-def _copy_slice(src: Path, dst: Path, start: int, end: int) -> None:
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    remaining = end - start
-    with open(src, "rb") as fi, open(dst, "wb") as fo:
-        fi.seek(start)
-        while remaining > 0:
-            block = fi.read(min(4 * 1024 * 1024, remaining))
-            if not block:
-                break
-            fo.write(block)
-            remaining -= len(block)
 
 
 def _existing_span(
@@ -412,13 +398,10 @@ def _write_sequence_part(
     for fr in frames:
         rel = _ltfs_relpath(root, fr.path)
         dst = mount / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(fr.path, dst)
-        digest = sha256_file(dst)
-        if readback:
-            if sha256_file(fr.path) != digest:
-                msg = f"{unit_key(unit)}::{fr.filename}"
-                mismatches.append(msg)
+        digest = copy_and_hash(fr.path, dst)
+        if readback and sha256_file(dst) != digest:
+            msg = f"{unit_key(unit)}::{fr.filename}"
+            mismatches.append(msg)
         checksums.append(FrameChecksum(filename=fr.filename, frame=fr.frame, size=fr.size, sha256=digest))
 
     # sidecar manifest — parallel _manifests/ path, never inside the shot folder.
@@ -496,23 +479,20 @@ def _write_file_part(
     rel = _ltfs_relpath(root, src)
     if placement.whole_file:
         dst = mount / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src, dst)
-        digest = sha256_file(dst)
+        digest = copy_and_hash(src, dst)
         if item.sha256 is None or placement.part_count == 1:
             item.sha256 = digest
         part_sha = digest
         ltfs_path = rel
-        if readback and sha256_file(src) != digest:
+        if readback and sha256_file(dst) != digest:
             mismatches.append(unit_key(unit))
     else:
         start = placement.byte_range_start or 0
         end = placement.byte_range_end or unit.size
         ltfs_path = f"{rel}.part{placement.part_index:03d}"
         dst = mount / ltfs_path
-        _copy_slice(src, dst, start, end)
-        part_sha = sha256_file(dst)
-        if readback and sha256_file(src, offset=start, length=end - start) != part_sha:
+        part_sha = copy_and_hash(src, dst, offset=start, length=end - start)
+        if readback and sha256_file(dst) != part_sha:
             mismatches.append(f"{unit_key(unit)} part {placement.part_index}")
 
     item.written_at = _now()

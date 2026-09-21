@@ -59,6 +59,16 @@ class RealHardware(TapeHardware):
         except IndexError as exc:
             raise HardwareError(f"no drive device configured for index {drive}") from exc
 
+    def _drive_st_device(self, drive: int) -> str:
+        try:
+            return self.settings.drive_st_devices[drive]
+        except IndexError as exc:
+            raise HardwareError(
+                f"no st-driver device configured for drive {drive} — set "
+                "DRIVE_ST_DEVICES in .env (e.g. /dev/nst0,/dev/nst1); `mt unlock` "
+                "needs the st node, not the SCSI-generic device used for mkltfs/ltfs"
+            ) from exc
+
     # --- mtx status parsing ----------------------------------------------
 
     def _parse_status(self, text: str) -> LibraryState:
@@ -133,6 +143,10 @@ class RealHardware(TapeHardware):
     def unmount_ltfs(self, drive: int) -> None:
         mp = self.mount_point_for(drive)
         self._run(["umount", str(mp)], timeout=1800)
+
+    def unlock_drive(self, drive: int) -> None:
+        dev = self._drive_st_device(drive)
+        self._run(["mt", "-f", dev, "unlock"], timeout=30)
 
     def clean_drive(self, drive: int, cleaning_slot: int) -> None:
         self.load(cleaning_slot, drive)

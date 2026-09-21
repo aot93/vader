@@ -121,6 +121,16 @@ class TapeHardware(abc.ABC):
     @abc.abstractmethod
     def clean_drive(self, drive: int, cleaning_slot: int) -> None: ...
 
+    def unlock_drive(self, drive: int) -> None:
+        """Clear a stuck SCSI PREVENT MEDIUM REMOVAL lock on ``drive``.
+
+        LTFS sets this lock on mount and clears it on a clean unmount; an
+        unclean shutdown (process killed mid-write) can leave it set, which
+        makes the changer refuse to eject the tape (`mtx unload` fails with
+        "Illegal Request" / "Medium removal prevented") until this runs.
+        No-op unless overridden — only real hardware has this failure mode."""
+        return
+
     # --- convenience shared by both implementations ---------------------------
 
     def mount_point_for(self, drive: int) -> Path:

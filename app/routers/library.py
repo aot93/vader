@@ -76,13 +76,33 @@ def do_unload(request: Request, slot: int = Form(...), drive: int = Form(...),
 @router.post("/format")
 def do_format(request: Request, drive: int = Form(...), barcode: str = Form(...),
               force: bool = Form(False), db: Session = Depends(get_db)):
+    barcode = barcode.strip()
+    # Checked here too, not just inside format_tape() once the job actually
+    # runs — mkltfs isn't reached until the job worker picks this up, so
+    # without this the operator submits the form, watches it get queued,
+    # then only finds out several seconds later (on the job's page) that the
+    # tape was never loaded. Failing the form immediately is strictly better.
+    try:
+        lib.require_drive_loaded(get_hardware().library_status(), drive, barcode)
+    except HardwareError as exc:
+        return _render(request, db, error=str(exc))
     # Runs as a background job, not inline — mkltfs's optimize pass can take
     # up to ~2h/tape on LTO-9, so blocking the request would leave the
     # operator staring at a hung page with no way to tell it's still working.
-    job = enqueue(db, JobType.format,
-                  {"drive": drive, "barcode": barcode.strip(), "force": force})
+    job = enqueue(db, JobType.format, {"drive": drive, "barcode": barcode, "force": force})
     db.commit()
     return RedirectResponse(f"/jobs/{job.id}", status_code=303)
+
+
+@router.post("/unlock")
+def do_unlock(request: Request, drive: int = Form(...), db: Session = Depends(get_db)):
+    try:
+        lib.unlock_drive(db, drive, initiated_by="operator")
+        db.commit()
+        return _render(request, db, notice=f"Sent ALLOW MEDIUM REMOVAL to drive {drive}.")
+    except HardwareError as exc:
+        db.rollback()
+        return _render(request, db, error=str(exc))
 
 
 @router.post("/clean")

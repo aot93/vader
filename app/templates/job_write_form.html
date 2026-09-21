@@ -47,9 +47,18 @@
 
   <label>Drive</label><input type="number" name="drive" value="0">
 
-  <p class="tag">The job runs in the background: scan → allocate tapes → copy → SHA256 →
-    read-back verify → catalog. It is idempotent; re-running after an interruption skips
-    already-written units.</p>
+  <label><input type="checkbox" name="readback_verify" value="true"> Enable write-time read-back verification</label>
+  <p class="tag warn">Off by default. Read-back verification re-reads every file immediately
+    after writing it and compares checksums, which is the safest way to catch a bad write —
+    but on real tape hardware it forces the drive to switch between write and read mode for
+    every single file. On sources with many small files this can make the job 10–20x slower
+    (observed: small-file items dropped from ~15–20s each to sub-second once this was turned
+    off). Recommended: leave it off here and run a separate
+    <a href="/jobs/new/verify">Verify job</a> afterward instead.</p>
+
+  <p class="tag">The job runs in the background: scan → allocate tapes → copy → SHA256
+    (→ read-back verify, if enabled above) → catalog. It is idempotent;
+    re-running after an interruption skips already-written units.</p>
   <p><button>Queue write job</button> <a class="btn ghost" href="/jobs">Cancel</a></p>
 </form>
 </div>

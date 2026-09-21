@@ -58,6 +58,7 @@ def create_write_job(
     source_machine: str = Form(""),
     backup_category: str = Form("project_archive"),
     drive: int = Form(0),
+    readback_verify: bool = Form(False),
 ):
     src = Path(source_path.strip())
     if not src.is_dir():
@@ -71,6 +72,7 @@ def create_write_job(
         "source_machine": source_machine.strip() or None,
         "backup_category": backup_category,
         "drive": drive,
+        "readback_verify": readback_verify,
     }
     job = enqueue(db, JobType.write, params)
     db.commit()

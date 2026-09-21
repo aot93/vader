@@ -66,6 +66,17 @@ class Settings:
     drive_devices: list[str] = field(
         default_factory=lambda: _list("DRIVE_DEVICES", ["/dev/sg1", "/dev/sg2"])
     )
+    # The st-driver counterpart of each drive_devices entry (/dev/nst0,
+    # /dev/nst1, ...), needed only for `mt` commands -- `mt` operates through
+    # the st driver's ioctls, which /dev/sg* nodes don't support (the reverse
+    # of the sg-only restriction on drive_devices above). Currently only used
+    # to clear a stuck SCSI PREVENT MEDIUM REMOVAL lock (`mt unlock`) after an
+    # unclean shutdown leaves a drive refusing to eject its tape. Get the
+    # mapping from `lsscsi -g` (matches by device, not by index order --
+    # nst index does not necessarily equal drive index).
+    drive_st_devices: list[str] = field(
+        default_factory=lambda: _list("DRIVE_ST_DEVICES", [])
+    )
     ltfs_mount_base: str = os.environ.get("LTFS_MOUNT_BASE", "/mnt/ltfs")
 
     sim_storage_slots: int = _int("SIM_STORAGE_SLOTS", 24)

@@ -37,6 +37,12 @@
         </div>
       </form>
     {% endif %}
+    <form class="inline" method="post" action="/library/unlock">
+      <input type="hidden" name="drive" value="{{ d.number }}">
+      <button class="ghost" data-busy-text="Unlocking…">Unlock drive</button>
+    </form>
+    <p class="tag">If Unload fails with "Illegal Request" / medium removal prevented — usually
+      after the app was killed or crashed mid-write — run this first, then retry Unload.</p>
   </div>
 {% endfor %}
 </div>

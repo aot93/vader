@@ -132,7 +132,7 @@ def run_batch_format(
                             # the only gate that should ever block this call.
                             get_hardware().mkltfs(drive_number, barcode, force=True)
                         except HardwareError as exc:
-                            lib.finish_event(s, event, EventResult.error, str(exc))
+                            lib.finish_event_error(s, event, exc)
                             raise
                         lib.finish_event(s, event, EventResult.success)
                         if tape:

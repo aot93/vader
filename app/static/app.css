@@ -95,6 +95,7 @@ button.danger, .btn.danger { background: transparent; border-color: var(--err); 
 .warnbox { border: 1px solid var(--warn); background: rgba(245,196,81,.1); padding: 10px 14px; border-radius: 8px; }
 pre.plan { background: #0f1216; border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow: auto; font-size: 12px; }
 .tag { font-size: 11px; color: var(--muted); }
+.tag.warn { color: var(--warn); }
 
 /* --- User manual (/help) ------------------------------------------------- */
 .manual { display: flex; gap: 20px; align-items: flex-start; }
