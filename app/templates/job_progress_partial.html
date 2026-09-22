@@ -5,7 +5,7 @@
   <p class="tag">
     {% if job.job_type.value == 'write' %}
       {{ job.progress_current | bytes }} / {{ job.progress_total | bytes }}
-      {% if job.status.value == 'running' and job.progress_rate_bytes_per_sec %}
+      {% if job.status.value == 'running' and job.progress_rate_bytes_per_sec and job.progress_is_live %}
         · {{ job.progress_rate_bytes_per_sec | bytes }}/s
         {% if job.eta_seconds is not none %} · ETA {{ job.eta_seconds | duration }}{% endif %}
       {% endif %}

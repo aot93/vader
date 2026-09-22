@@ -358,6 +358,19 @@ class RestoreRequest(Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+# Whole-file (non-sequence) write units only report progress once the
+# *entire* file is done -- no intra-file signal the way sequences get
+# per-frame updates. A large file in flight means no progress() call for as
+# long as it takes to copy, so Job.progress_rate_bytes_per_sec is whatever
+# the last call happened to compute, however long ago and however small
+# that sample was -- confirmed live: a sample taken right as a resume's
+# fast-forward replay ended landed on 195 B/s, then sat unchanged for the
+# next 10+ minutes while a 2GB file was actually transferring at several
+# MB/s, producing a 556-year ETA that was technically the correct division
+# but completely disconnected from what was actually happening.
+_PROGRESS_STALE_SECONDS = 60
+
+
 class Job(Base):
     """Persisted background job (§2). Survives a VM restart so an interrupted
     copy/verify can be spotted and safely re-run (§6 idempotency)."""
@@ -402,8 +415,19 @@ class Job(Base):
         return min(int(self.progress_current * 100 / self.progress_total), 100)
 
     @property
+    def progress_is_live(self) -> bool:
+        if self.heartbeat_at is None:
+            return False
+        heartbeat = self.heartbeat_at
+        if heartbeat.tzinfo is None:
+            heartbeat = heartbeat.replace(tzinfo=UTC)
+        return (datetime.now(UTC) - heartbeat).total_seconds() <= _PROGRESS_STALE_SECONDS
+
+    @property
     def eta_seconds(self) -> int | None:
         if not self.progress_rate_bytes_per_sec or self.progress_total <= self.progress_current:
+            return None
+        if not self.progress_is_live:
             return None
         return int((self.progress_total - self.progress_current) / self.progress_rate_bytes_per_sec)
 
